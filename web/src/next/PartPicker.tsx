@@ -94,7 +94,7 @@ function Body({ slot, build, onClose, onPick, onIntegrated }: Props & { slot: Sl
             <strong title={item.name}>{item.name}</strong>
             <span className="nx-muted">{item.summary}</span>
             {item.performance?.gaming && (
-              <span className="nx-perf">{slot === 'gpu' ? `2K 游戏 ${item.performance.gaming.index}%` : `游戏 ${item.performance.gaming.index}%`}</span>
+              <span className="nx-perf" title={item.performance.gaming.label ?? undefined}>{slot === 'gpu' ? `2K 游戏 ${item.performance.gaming.index}%` : `游戏 ${item.performance.gaming.index}%`}{item.performance.gaming.label ? '*' : ''}</span>
             )}
             <span className="nx-pick-price">{item.estimatedPriceCents ? `约 ${formatYuan(item.estimatedPriceCents)}` : '暂无价格'}</span>
             {item.id === current && <span className="nx-badge">当前</span>}

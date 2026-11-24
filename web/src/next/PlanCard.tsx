@@ -44,7 +44,7 @@ export function PlanCard({ plan, budgetCents, scenarios, onChoose }: { plan: Pla
 
       <div className="nx-plan-perf">
         <span className="nx-tier">{gpuTier(gpu?.performance?.gaming?.index, plan.igpu)}</span>
-        {!plan.igpu && gpu?.performance?.gaming && <span className="nx-muted">显卡 2K 性能 {gpu.performance.gaming.index}%</span>}
+        {!plan.igpu && gpu?.performance?.gaming && <span className="nx-muted">显卡 2K 性能 {gpu.performance.gaming.index}%{gpu.performance.gaming.label ? `（${gpu.performance.gaming.label}）` : ''}</span>}
         {cpu?.performance?.gaming && <span className="nx-muted">CPU 游戏 {cpu.performance.gaming.index}%</span>}
       </div>
 

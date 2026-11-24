@@ -55,7 +55,7 @@ export function Editor({ build, dispatch, onBack, onPick, onEditPrice, onSave, s
                     <>
                       <strong className="nx-row-name" title={part.name}>{part.name}</strong>
                       <span className="nx-muted">{item?.summary || part.spec}</span>
-                      {perf?.gaming && <span className="nx-perf">{id === 'gpu' ? `2K 游戏性能 ${perf.gaming.index}%` : `游戏性能 ${perf.gaming.index}%（1080p）`}</span>}
+                      {perf?.gaming && <span className="nx-perf">{id === 'gpu' ? `2K 游戏性能 ${perf.gaming.index}%` : `游戏性能 ${perf.gaming.index}%（1080p）`}{perf.gaming.label ? ` · ${perf.gaming.label}` : ''}</span>}
                     </>
                   ) : (
                     <span className="nx-muted">还没选</span>
