@@ -5,7 +5,7 @@
     "resolution": "2560x1440",
     "baseline": "PNY RTX 5080 Slim OC 16 GB = 100（原厂 RTX 5080 为 96）",
     "date": null,
-    "note": "按用户提供的截图逐条录入；显卡名按芯片与显存归一。表中未列出的芯片（如 RX 9070 GRE、Arc B570）没有游戏指数。 标记 converted 的条目来自另一张 TechPowerUp 2560x1440 相对性能图（RTX 4070 Ti = 100%），按 TPU 值最接近的 4 张两图共有显卡的平均比例换算，误差约 ±2；早先这些条目按 1080p 图换算，2026-11-24 改用 1440p 图。 2026-11-24 另补：RX 9070 GRE 取自 TPU RX 9070 GRE 评测的 1440p 相对性能图；RX 6650 XT、GTX 1660 SUPER、RX 6500 XT、RTX 2070/2080 取自 TPU RX 7600 评测的 1080p 图；GTX 1650 SUPER、1660 Ti、1060、RX 5500 XT/5600 XT/5700、RTX 2060/2070/2080 SUPER 取自 TPU RX 6500 XT 评测的 1080p 图。A、B 按同图最接近的 4 款表内原始数据换算；C 的低端缺原始数据，锚点也用 B 换算出的 RX 6500 XT、GTX 1660 SUPER 等。",
+    "note": "按用户提供的截图逐条录入；显卡名按芯片与显存归一。表中未列出的芯片（如 RX 9070 GRE、Arc B570）没有游戏指数。 标记 converted 的条目来自另一张 TechPowerUp 2560x1440 相对性能图（RTX 4070 Ti = 100%），按 TPU 值最接近的 4 张两图共有显卡的平均比例换算，误差约 ±2；早先这些条目按 1080p 图换算，2026-11-24 改用 1440p 图。 2026-11-24 另补：RX 9070 GRE 取自 TPU RX 9070 GRE 评测的 1440p 相对性能图；RX 6650 XT、GTX 1660 SUPER、RX 6500 XT、RTX 2070/2080 取自 TPU RX 7600 评测的 1080p 图；GTX 1650 SUPER、1660 Ti、1060、RX 5500 XT/5600 XT/5700、RTX 2060/2070/2080 SUPER 取自 TPU RX 6500 XT 评测的 1080p 图。A、B 按同图最接近的 4 款表内原始数据换算；C 的低端缺原始数据，锚点也用 B 换算出的 RX 6500 XT、GTX 1660 SUPER 等。 标“按比例估算”的条目（GTX 1650/1660、RX 6750 XT/6750 GRE/7650 GRE）不是评测原图读数，是按同芯片/同规格型号的经验比例估算（estimated 字段写明公式），误差可能到 ±3。",
     "entries": [
       {
         "key": "RTX 5090",
@@ -156,6 +156,13 @@
         "relative": 44
       },
       {
+        "key": "RX 6750 XT",
+        "relative": 40,
+        "label": "按比例估算",
+        "converted": true,
+        "estimated": "≈ 1.06 × RX 6700 XT"
+      },
+      {
         "key": "RTX 3060 TI",
         "relative": 39
       },
@@ -165,6 +172,13 @@
         "label": "1440p 换算",
         "converted": true,
         "from1440p": 53
+      },
+      {
+        "key": "RX 6750 GRE 12GB",
+        "relative": 38,
+        "label": "按比例估算",
+        "converted": true,
+        "estimated": "≈ RX 6700 XT（规格几乎一致）"
       },
       {
         "key": "ARC B580",
@@ -187,6 +201,20 @@
       {
         "key": "RX 7600 XT",
         "relative": 34
+      },
+      {
+        "key": "RX 6750 GRE 10GB",
+        "relative": 34,
+        "label": "按比例估算",
+        "converted": true,
+        "estimated": "≈ 0.89 × RX 6750 GRE 12GB"
+      },
+      {
+        "key": "RX 7650 GRE",
+        "relative": 34,
+        "label": "按比例估算",
+        "converted": true,
+        "estimated": "≈ 1.085 × RX 7600"
       },
       {
         "key": "RTX 4060",
@@ -308,6 +336,13 @@
         "from1080p": 129
       },
       {
+        "key": "GTX 1660",
+        "relative": 17,
+        "label": "按比例估算",
+        "converted": true,
+        "estimated": "≈ 0.88 × GTX 1660 SUPER"
+      },
+      {
         "key": "RX 5500 XT",
         "relative": 15,
         "label": "1080p 换算",
@@ -334,6 +369,13 @@
         "label": "1080p 换算",
         "converted": true,
         "from1080p": 92
+      },
+      {
+        "key": "GTX 1650",
+        "relative": 11,
+        "label": "按比例估算",
+        "converted": true,
+        "estimated": "≈ 0.77 × GTX 1650 SUPER"
       }
     ]
   },
@@ -343,7 +385,7 @@
     "resolution": "1920x1080",
     "baseline": "AMD Ryzen 7 9850X3D = 100",
     "date": "2026-09-01",
-    "note": "按用户提供的截图逐条录入。1080p 更能拉开 CPU 差距，2K 下差距会缩小，但排名基本一致。Intel K / KF、F 与无 F 型号按同一性能处理。表中 RYZEN 9900X3D、I5-14500、RYZEN 8700F、I5-14400、I3-14100F、RYZEN 8500G 不在 9 月这张图里，沿用 2026-08-02 的同口径汇总图。 标记 converted 的条目（720p 换算）来自 TechPowerUp i5-13400F 评测的 1280x720 游戏相对性能图（RTX 4090），按同图最接近的 4 款表内型号的平均比例换算到本表口径，误差约 ±2。",
+    "note": "按用户提供的截图逐条录入。1080p 更能拉开 CPU 差距，2K 下差距会缩小，但排名基本一致。Intel K / KF、F 与无 F 型号按同一性能处理。表中 RYZEN 9900X3D、I5-14500、RYZEN 8700F、I5-14400、I3-14100F、RYZEN 8500G 不在 9 月这张图里，沿用 2026-08-02 的同口径汇总图。 标记 converted 的条目（720p 换算）来自 TechPowerUp i5-13400F 评测的 1280x720 游戏相对性能图（RTX 4090），按同图最接近的 4 款表内型号的平均比例换算到本表口径，误差约 ±2。 RYZEN 9600 按 0.98 × 9600X 估算（同为 Zen 5 6 核 65W，加速频率低 0.2 GHz），非评测原图读数。",
     "entries": [
       {
         "key": "RYZEN 9850X3D",
@@ -454,6 +496,13 @@
       {
         "key": "RYZEN 9600X",
         "relative": 73.6
+      },
+      {
+        "key": "RYZEN 9600",
+        "relative": 72.1,
+        "label": "按比例估算",
+        "converted": true,
+        "estimated": "≈ 0.98 × R5 9600X"
       },
       {
         "key": "RYZEN 9500F",
