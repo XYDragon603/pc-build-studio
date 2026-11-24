@@ -5,7 +5,7 @@
     "resolution": "2560x1440",
     "baseline": "PNY RTX 5080 Slim OC 16 GB = 100（原厂 RTX 5080 为 96）",
     "date": null,
-    "note": "按用户提供的截图逐条录入；显卡名按芯片与显存归一。表中未列出的芯片（如 RX 9070 GRE、Arc B570）没有游戏指数。 标记 converted 的条目来自另一张 TechPowerUp 1080p 图（RTX 5070 FE = 100%），按两图共有显卡的比例换算（入门段 ×0.68：RTX 4060 50→33、RX 7600 46→31、RTX 3050 31→21、Arc B580 53→36；中段 ×0.70：RX 6800 XT 79→56、RX 7800 XT 82→58），误差约 ±2。",
+    "note": "按用户提供的截图逐条录入；显卡名按芯片与显存归一。表中未列出的芯片（如 RX 9070 GRE、Arc B570）没有游戏指数。 标记 converted 的条目来自另一张 TechPowerUp 2560x1440 相对性能图（RTX 4070 Ti = 100%），按 TPU 值最接近的 4 张两图共有显卡的平均比例换算，误差约 ±2；早先这些条目按 1080p 图换算，2026-11-24 改用 1440p 图。",
     "entries": [
       {
         "key": "RTX 5090",
@@ -106,20 +106,20 @@
       {
         "key": "RTX 3070 TI",
         "relative": 48,
-        "label": "1080p 换算",
+        "label": "1440p 换算",
         "converted": true,
-        "from1080p": 69
+        "from1440p": 66
+      },
+      {
+        "key": "RX 6800",
+        "relative": 48,
+        "label": "1440p 换算",
+        "converted": true,
+        "from1440p": 66
       },
       {
         "key": "RX 9060 XT 16GB",
         "relative": 47
-      },
-      {
-        "key": "RX 6800",
-        "relative": 47,
-        "label": "1080p 换算",
-        "converted": true,
-        "from1080p": 67
       },
       {
         "key": "RTX 3070",
@@ -128,6 +128,13 @@
       {
         "key": "RX 9060 XT 8GB",
         "relative": 45
+      },
+      {
+        "key": "RTX 2080 TI",
+        "relative": 45,
+        "label": "1440p 换算",
+        "converted": true,
+        "from1440p": 61
       },
       {
         "key": "RTX 4060 TI 16GB",
@@ -142,22 +149,15 @@
         "relative": 44
       },
       {
-        "key": "RTX 2080 TI",
-        "relative": 44,
-        "label": "1080p 换算",
-        "converted": true,
-        "from1080p": 64
-      },
-      {
         "key": "RTX 3060 TI",
         "relative": 39
       },
       {
         "key": "RX 6700 XT",
         "relative": 38,
-        "label": "1080p 换算",
+        "label": "1440p 换算",
         "converted": true,
-        "from1080p": 56
+        "from1440p": 53
       },
       {
         "key": "ARC B580",
@@ -188,39 +188,39 @@
         "relative": 30
       },
       {
-        "key": "RX 6600 XT",
-        "relative": 29,
-        "label": "1080p 换算",
+        "key": "ARC A750",
+        "relative": 30,
+        "label": "1440p 换算",
         "converted": true,
-        "from1080p": 43
+        "from1440p": 42
       },
       {
-        "key": "ARC A750",
-        "relative": 29,
-        "label": "1080p 换算",
+        "key": "RX 6600 XT",
+        "relative": 28,
+        "label": "1440p 换算",
         "converted": true,
-        "from1080p": 42
+        "from1440p": 39
       },
       {
         "key": "RX 5700 XT",
         "relative": 28,
-        "label": "1080p 换算",
+        "label": "1440p 换算",
         "converted": true,
-        "from1080p": 41
+        "from1440p": 39
+      },
+      {
+        "key": "ARC A580",
+        "relative": 26,
+        "label": "1440p 换算",
+        "converted": true,
+        "from1440p": 36
       },
       {
         "key": "RX 6600",
         "relative": 25,
-        "label": "1080p 换算",
+        "label": "1440p 换算",
         "converted": true,
-        "from1080p": 37
-      },
-      {
-        "key": "ARC A580",
-        "relative": 25,
-        "label": "1080p 换算",
-        "converted": true,
-        "from1080p": 37
+        "from1440p": 34
       },
       {
         "key": "RTX 3050",
@@ -233,16 +233,16 @@
     ]
   },
   "cpu": {
-    "source": "CPU (Selected Recent) 1080p Gaming Performance — 依据 TechSpot 数据的汇总图；TechSpot 未测的型号由 TechPowerUp 等来源插值",
+    "source": "CPU (Last 3 Generations) 1080p Gaming Performance — 依据 TechSpot 数据的汇总图（截至 2026-09-01）",
     "url": null,
     "resolution": "1920x1080",
     "baseline": "AMD Ryzen 7 9850X3D = 100",
-    "date": "2026-08-02",
-    "note": "按用户提供的截图逐条录入。1080p 更能拉开 CPU 差距，2K 下差距会缩小，但排名基本一致。Intel K / KF、F 与无 F 型号按同一性能处理。",
+    "date": "2026-09-01",
+    "note": "按用户提供的截图逐条录入。1080p 更能拉开 CPU 差距，2K 下差距会缩小，但排名基本一致。Intel K / KF、F 与无 F 型号按同一性能处理。表中 RYZEN 9900X3D、I5-14500、RYZEN 8700F、I5-14400、I3-14100F、RYZEN 8500G 不在 9 月这张图里，沿用 2026-08-02 的同口径汇总图。",
     "entries": [
       {
         "key": "RYZEN 9850X3D",
-        "relative": 100.0
+        "relative": 100
       },
       {
         "key": "RYZEN 9950X3D2",
@@ -254,7 +254,7 @@
       },
       {
         "key": "RYZEN 9800X3D",
-        "relative": 96.4
+        "relative": 96.2
       },
       {
         "key": "RYZEN 9900X3D",
@@ -262,7 +262,7 @@
       },
       {
         "key": "RYZEN 7800X3D",
-        "relative": 88.2
+        "relative": 88.1
       },
       {
         "key": "RYZEN 7950X3D",
@@ -270,36 +270,40 @@
       },
       {
         "key": "RYZEN 7700X3D",
-        "relative": 82.2
+        "relative": 83.1
+      },
+      {
+        "key": "I9-13900KS",
+        "relative": 81.4
       },
       {
         "key": "RYZEN 7900X3D",
         "relative": 81.1
       },
       {
-        "key": "I9-14900K",
-        "relative": 81.0
+        "key": "RYZEN 7600X3D",
+        "relative": 81.1
       },
       {
-        "key": "RYZEN 7600X3D",
-        "relative": 80.9
+        "key": "I9-14900K",
+        "relative": 81.1
       },
       {
         "key": "I9-13900K",
         "relative": 80.1
       },
       {
-        "key": "RYZEN 7500X3D",
-        "relative": 79.8
+        "key": "ULTRA7-270K",
+        "relative": 79.3,
+        "label": "Ultra 7 270K Plus"
       },
       {
         "key": "I7-14700K",
         "relative": 79.3
       },
       {
-        "key": "ULTRA7-270K",
-        "relative": 79.2,
-        "label": "Ultra 7 270K Plus"
+        "key": "RYZEN 7500X3D",
+        "relative": 79.1
       },
       {
         "key": "RYZEN 9700X",
@@ -310,12 +314,16 @@
         "relative": 76.7
       },
       {
+        "key": "I7-13700K",
+        "relative": 76.5
+      },
+      {
         "key": "ULTRA9-285K",
-        "relative": 76.0
+        "relative": 76.1
       },
       {
         "key": "RYZEN 7950X",
-        "relative": 75.8
+        "relative": 76
       },
       {
         "key": "RYZEN 7700X",
@@ -323,32 +331,60 @@
       },
       {
         "key": "ULTRA5-250K",
-        "relative": 75.0,
+        "relative": 75.1,
         "label": "Ultra 5 250K Plus"
       },
       {
-        "key": "RYZEN 9600X",
+        "key": "RYZEN 7900X",
+        "relative": 74
+      },
+      {
+        "key": "RYZEN 7700",
+        "relative": 74
+      },
+      {
+        "key": "RYZEN 9900X",
         "relative": 73.7
       },
       {
+        "key": "RYZEN 9600X",
+        "relative": 73.6
+      },
+      {
+        "key": "RYZEN 9500F",
+        "relative": 72
+      },
+      {
         "key": "RYZEN 7600X",
-        "relative": 72.1
+        "relative": 72
       },
       {
         "key": "I5-14600K",
-        "relative": 72.0
+        "relative": 72
+      },
+      {
+        "key": "I5-13600K",
+        "relative": 71.8
+      },
+      {
+        "key": "RYZEN 7900",
+        "relative": 71.7
       },
       {
         "key": "ULTRA7-265K",
-        "relative": 71.2
+        "relative": 71.3
       },
       {
         "key": "RYZEN 5800X3D",
-        "relative": 71.0
+        "relative": 71.1
       },
       {
         "key": "I9-12900K",
         "relative": 70.7
+      },
+      {
+        "key": "RYZEN 7600",
+        "relative": 70
       },
       {
         "key": "RYZEN 7500F",
@@ -363,12 +399,24 @@
         "relative": 67.6
       },
       {
-        "key": "RYZEN 5600X3D",
-        "relative": 66.5
+        "key": "I7-12700K",
+        "relative": 66.8
       },
       {
         "key": "I5-14500",
         "relative": 66.4
+      },
+      {
+        "key": "RYZEN 5600X3D",
+        "relative": 66.3
+      },
+      {
+        "key": "RYZEN 7400F",
+        "relative": 65.7
+      },
+      {
+        "key": "I5-13500",
+        "relative": 64.5
       },
       {
         "key": "ULTRA5-225",
@@ -381,6 +429,10 @@
       {
         "key": "RYZEN 5500X3D",
         "relative": 62.1
+      },
+      {
+        "key": "I5-12600K",
+        "relative": 61.6
       },
       {
         "key": "RYZEN 8700F",
@@ -399,12 +451,32 @@
         "relative": 57.8
       },
       {
+        "key": "RYZEN 5900X",
+        "relative": 57.6
+      },
+      {
+        "key": "RYZEN 5800XT",
+        "relative": 57.2
+      },
+      {
         "key": "RYZEN 5950X",
         "relative": 57.2
       },
       {
+        "key": "RYZEN 5900XT",
+        "relative": 57.1
+      },
+      {
+        "key": "I5-12400F",
+        "relative": 56.8
+      },
+      {
         "key": "RYZEN 5700X",
         "relative": 56.1
+      },
+      {
+        "key": "RYZEN 5800X",
+        "relative": 55.8
       },
       {
         "key": "I9-11900K",
@@ -419,12 +491,32 @@
         "relative": 53.5
       },
       {
+        "key": "RYZEN 5600",
+        "relative": 51.7
+      },
+      {
+        "key": "I3-12100F",
+        "relative": 51.6
+      },
+      {
         "key": "RYZEN 8500G",
         "relative": 51.3
       },
       {
+        "key": "RYZEN 5700G",
+        "relative": 48.2
+      },
+      {
+        "key": "RYZEN 5700",
+        "relative": 48.1
+      },
+      {
         "key": "RYZEN 5500",
         "relative": 47.9
+      },
+      {
+        "key": "RYZEN 5600G",
+        "relative": 46.2
       },
       {
         "key": "RYZEN 3950X",
