@@ -1,0 +1,111 @@
+[
+  {
+    "id": "amd-ryzen-7-9700x",
+    "category": "CPU",
+    "name": "AMD Ryzen 7 9700X",
+    "manufacturer": "AMD",
+    "mpn": "100-100001404WOF",
+    "summary": "AM5 · 8 核 16 线程 · 盒装",
+    "aliases": ["锐龙 7 9700X", "R7 9700X", "盒装 CPU"],
+    "specs": { "socket": "AM5", "memoryType": "DDR5", "cores": 8, "threads": 16 },
+    "imageUrl": "https://cdn11.bigcommerce.com/s-7g81zn9sor/images/stencil/600x600/products/166/472/2733716-ryzen-7-9000-series_1200x1200__59088.1721678922.png?c=1",
+    "imageSourceUrl": "https://shop-us-en.amd.com/amd-ryzen-7-9700x-processor/",
+    "sourceUrl": "https://www.amd.com/en/products/processors/desktops/ryzen/9000-series/amd-ryzen-7-9700x.html"
+  },
+  {
+    "id": "asus-dual-rtx5060ti-o16g",
+    "category": "GPU",
+    "name": "ASUS Dual GeForce RTX 5060 Ti 16GB OC Edition",
+    "manufacturer": "ASUS",
+    "mpn": "DUAL-RTX5060TI-O16G",
+    "summary": "RTX 5060 Ti · 16GB GDDR7",
+    "aliases": ["华硕 RTX 5060 Ti 16GB", "华硕 Dual 16GB", "RTX5060Ti 16GB"],
+    "specs": { "chipset": "RTX 5060 Ti", "capacityGB": 16, "memoryType": "GDDR7" },
+    "imageUrl": "https://dlcdnwebimgs.asus.com/gain/d9408583-9a6f-4a2b-b721-c09f1fe8cf99/",
+    "sourceUrl": "https://www.asus.com/motherboards-components/graphics-cards/dual/dual-rtx5060ti-o16g/"
+  },
+  {
+    "id": "asus-dual-rtx5060ti-o8g",
+    "category": "GPU",
+    "name": "ASUS Dual GeForce RTX 5060 Ti 8GB OC Edition",
+    "manufacturer": "ASUS",
+    "mpn": "DUAL-RTX5060TI-O8G",
+    "summary": "RTX 5060 Ti · 8GB GDDR7",
+    "aliases": ["华硕 RTX 5060 Ti 8GB", "华硕 Dual 8GB", "RTX5060Ti 8GB"],
+    "specs": { "chipset": "RTX 5060 Ti", "capacityGB": 8, "memoryType": "GDDR7" },
+    "imageUrl": "https://dlcdnwebimgs.asus.com/gain/e4609242-8600-436e-8bfc-f0d27b6f0984/",
+    "sourceUrl": "https://www.asus.com/motherboards-components/graphics-cards/dual/dual-rtx5060ti-o8g/"
+  },
+  {
+    "id": "msi-pro-b650m-a-wifi",
+    "category": "MOTHERBOARD",
+    "name": "MSI PRO B650M-A WIFI",
+    "manufacturer": "MSI",
+    "mpn": "PRO B650M-A WIFI",
+    "summary": "AMD B650 · AM5 · DDR5 · Micro-ATX",
+    "aliases": ["微星 B650M-A WIFI", "微星 AM5 主板"],
+    "specs": { "socket": "AM5", "memoryType": "DDR5", "formFactor": "Micro-ATX" },
+    "imageUrl": "https://storage-asset.msi.com/global/picture/product/product_1664782100d10ef26fe3fc5c4c436cc139db200c1c.webp",
+    "sourceUrl": "https://www.msi.com/Motherboard/PRO-B650M-A-WIFI"
+  },
+  {
+    "id": "kingston-kf560c30bbek2-32",
+    "category": "RAM",
+    "name": "Kingston FURY Beast DDR5-6000 CL30 32GB Kit",
+    "manufacturer": "Kingston",
+    "mpn": "KF560C30BBEK2-32",
+    "summary": "DDR5-6000 · 16GB × 2 · AMD EXPO",
+    "aliases": ["金士顿 野兽 32GB", "DDR5 6000 32GB", "DDR5 32G 套条"],
+    "specs": { "memoryType": "DDR5", "capacityGB": 32, "modules": 2, "speedMTs": 6000 },
+    "imageUrl": "https://media.kingston.com/kingston/product/FURY_Beast_Black_DDR5_1-tn.png",
+    "sourceUrl": "https://www.kingston.com/en/memory/search?partid=KF560C30BBEK2-32"
+  },
+  {
+    "id": "samsung-990-pro-1tb",
+    "category": "SSD",
+    "name": "Samsung 990 PRO 1TB NVMe SSD",
+    "manufacturer": "Samsung",
+    "mpn": "MZ-V9P1T0BW",
+    "summary": "1TB · M.2 2280 · PCIe 4.0 NVMe",
+    "aliases": ["三星 990 PRO 1TB", "三星 990PRO 1T", "固态硬盘"],
+    "specs": { "capacityGB": 1000, "formFactor": "M.2 2280", "interface": "PCIe 4.0 NVMe" },
+    "imageUrl": "https://images.samsung.com/is/image/samsung/p6pim/uk/mz-v9p1t0bw/gallery/uk-990pro-nvme-m2-ssd-mz-v9p1t0bw-534234835?%241164_776_PNG%24=",
+    "sourceUrl": "https://www.samsung.com/uk/memory-storage/nvme-ssd/990-pro-1tb-nvme-pcie-gen-4-mz-v9p1t0bw/"
+  },
+  {
+    "id": "corsair-rm750e-2025-na",
+    "category": "PSU",
+    "name": "Corsair RM750e 750W (2025)",
+    "manufacturer": "Corsair",
+    "mpn": "CP-9020295-NA",
+    "summary": "750W · ATX 3.1 · 全模组 · 北美料号",
+    "aliases": ["海盗船 RM750e", "海盗船 750W 全模组"],
+    "specs": { "ratedWatts": 750, "formFactor": "ATX" },
+    "imageUrl": "https://assets.corsair.com/image/upload/c_pad%2Cq_85%2Ch_1920%2Cw_1920%2Cf_auto/products/rme-series-2025/Gallery/CP-9020295-NA_01.webp",
+    "sourceUrl": "https://www.corsair.com/us/en/p/psu/cp-9020295-na/rme-series-rm750e-fully-modular-low-noise-atx-power-supply-cp-9020295-na"
+  },
+  {
+    "id": "fractal-pop-mini-silent-black-solid",
+    "category": "CASE",
+    "name": "Fractal Design Pop Mini Silent Black Solid",
+    "manufacturer": "Fractal Design",
+    "mpn": "FD-C-POS1M-01",
+    "summary": "Micro-ATX · 黑色实体侧板",
+    "aliases": ["分形工艺 Pop Mini Silent", "静音机箱 MATX"],
+    "specs": { "formFactor": "Micro-ATX" },
+    "imageUrl": "https://assets.fractal-design.com/images/uxzbxy2o/production/dfc170d5f08997795f574e4eb918c790af68c9d3-2560x2560.jpg?auto=format&q=75&w=640",
+    "sourceUrl": "https://www.fractal-design.com/products/cases/pop-series/pop-mini-silent/pop-mini-silent-black-solid/"
+  },
+  {
+    "id": "thermalright-peerless-assassin-120-se",
+    "category": "COOLER",
+    "name": "Thermalright Peerless Assassin 120 SE",
+    "manufacturer": "Thermalright",
+    "mpn": "Peerless Assassin 120 SE",
+    "summary": "双塔风冷 · 双 120mm 风扇",
+    "aliases": ["利民 PA120 SE", "利民 绝双刺客 120 SE", "PA120SE"],
+    "specs": { "fanSizeMm": 120 },
+    "imageUrl": "https://www.thermalright.com/wp-content/uploads/2026/08/peerless-assassin-120-se.png",
+    "sourceUrl": "https://www.thermalright.com/product/peerless-assassin-120-se/"
+  }
+]

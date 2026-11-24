@@ -1,0 +1,33 @@
+Use case: ui-mockup.
+Create ONE polished, high-fidelity simplified-Chinese desktop PC-build configurator application screenshot, wide landscape about 1680x1100. Front-on flat full application screen, no device, browser chrome, perspective or presentation board. Product name “装机工作台”. Extremely crisp CJK sans serif typography, precise alignment, sophisticated implementable web UI. Clean thin outline icons. No decorative charts, excessive gradients or filler dashboard metrics.
+
+This is a visual alternative to compare with other designs, using identical illustrative build data. Clearly show “演示模式 · 价格为演示数据” near top. Main title “2K 游戏主机”. Budget is ¥8,000, with directly editable amount AND a secondary slider. Purpose “2K 游戏”, “安静优先”. Current build is “7 / 8 件已选”; GPU is the active unfilled slot. Seven manual prices total exactly ¥3,944, remaining budget exactly ¥4,056. GPU candidate prices DO NOT enter the total yet. A candidate has an enabled “加入配置” action demonstrating an explicit manually confirmed offer, labeled “手动已确认”; this is illustrative demo confirmation, NEVER claim a real API-verified price. Pending-price candidates have “核实报价” or “手动填价” actions instead.
+
+Eight part rows or compact build summary:
+CPU: “AMD Ryzen 7 9700X”, “AM5 · 盒装”, ¥1,450, visible closed-lock icon.
+GPU: “待选择显卡”, “RTX 5060 Ti · 16GB”, price —, clearly selected.
+主板: “B650M WIFI”, “AM5 · DDR5”, ¥799.
+内存: “DDR5 6000 32GB”, “16GB × 2”, ¥499.
+固态硬盘: “NVMe SSD 1TB”, ¥399.
+电源: “650W 金牌全模组”, ¥399.
+机箱: “mATX 静音机箱”, ¥249.
+散热器: “双塔风冷散热器”, ¥149.
+Give unlocked parts compact open-lock icons, without repeating “未锁定” text on every row. Shared label “已选配件为手动价”. An “添加自定义配件” control.
+
+GPU discovery: heading “显卡候选”, search input “RTX 5060 Ti 16GB”, action “查找报价”, filter chips “新品”, “16GB”, “京东”.
+Candidate A: “影驰 RTX 5060 Ti 16GB”, “金属大师 · 16GB GDDR7”, ¥3,999, green/positive TEXT badge “手动已确认”, small “京东 · 演示报价”, primary action “加入配置”, secondary “查看来源 ↗”. Small realistic tasteful graphite dual/triple-fan GPU thumbnail.
+Candidate B: “华硕 RTX 5060 Ti 16GB”, displayed price “待核实”, amber badge “需登录确认”, action “核实报价”, source “京东 · 演示报价”. Different modest GPU thumbnail.
+Candidate C: “七彩虹 RTX 5060 Ti 16GB”, price “价格未获取”, action “手动填价”, restrained GPU thumbnail.
+Wrong-capacity products should ONLY appear in a collapsed disclosure “已过滤 1 项 · 显存不符”, NOT a large rejected product card.
+One concise warning, once: “待核实报价不计入总价”.
+Compatibility: “接口一致”, “BIOS 待确认”, “功耗待补齐显卡后估算”; do not invent verified power draw or claim complete compatibility.
+Provide “保存方案” and “导出清单” secondary utilities, display region “中国大陆 · CNY”.
+Important exact arithmetic: sum ¥3,944 and remaining ¥4,056. Budget ¥8,000. Pending candidate is not already added. Good whitespace without wasting a huge blank sidebar. Chinese labels must be legible. Clear text/icon distinction between confirmed, pending, locked and active states.
+
+Visual direction C: approachable premium guided PC-building experience for less experienced users. Warm ivory #F7F5F0 canvas, pure-white cards, charcoal #242B28 text, deep teal #21645B actions, soft pistachio #E7EDDA selection, amber review. Refined 14px corners, subtle elevation, more breathing room and larger friendly typography than a technical table. Professional, calm, no toy-like cartoon icons, rainbow, gradients, oversized hero marketing or neon.
+
+Layout distinctly different from a table workbench: NO permanent sidebar. Thin top navigation with chip wordmark “装机工作台” left, “我的方案” and export right, visible demo disclaimer. Header title “还差一张显卡，配置就齐了”, secondary project name “2K 游戏主机”. A neat budget input ¥8,000 and short slider, purpose chips at right. Under header a horizontal EIGHT-STEP component selector: “CPU”, “显卡”, “主板”, “内存”, “硬盘”, “电源”, “机箱”, “散热”; completed steps show small tick, CPU lock; GPU is selected with a clear solid teal mark. The steps are compact clear controls, not giant illustrations.
+
+Main content split: left approximately 1100px for product selection and right approximately 360px for a sticky order-summary card. Left title “为你的主机选择显卡”, then search and filter row. Display three rich product cards in a uniform THREE-COLUMN grid, with clean cutout graphics cards on light neutral thumbnail areas, explicit model and 16GB specification, source and state. Card A has “手动已确认”, large ¥3,999 and full-width deep-teal “加入配置” button. Card B pending login, shows “待核实” instead of fabricated final price, and outlined “核实报价”. Card C price unknown and outlined “手动填价”. These three cards must fit cleanly, no text overflow. Below grid folded “已过滤 1 项 · 显存不符”. Single concise caution notice about pending prices not counted.
+
+Right summary heading “我的配置 · 7/8”, compact vertical eight-component list using the exact models/prices given in shared brief but abbreviated when necessary; GPU row selected and shows “待选择”. CPU tiny closed lock. Include tiny shared label “手动价”. Then “已选合计” large ¥3,944, “剩余预算 ¥4,056”, one subtle budget progress bar, outlined “保存方案”. Below main selection area a neat low-height compatibility card: interface match, BIOS pending, power pending GPU. Add unobtrusive “添加自定义配件” link. This must feel genuinely easier and more welcoming than the table design, while maintaining the same information accuracy and active GPU selection state.

@@ -1,0 +1,106 @@
+import { describe, expect, it } from 'vitest';
+import { buildReducer, totals } from './build';
+import { applyFilters } from './candidates';
+import { compatibility } from './compat';
+import { candidateById, DEMO_CANDIDATES, demoBuild } from './demoData';
+import { formatYuan, parseYuan } from './money';
+
+describe('演示方案与设计稿数字一致', () => {
+  it('7/8 件、合计 ¥3,944、剩余 ¥4,056', () => {
+    const t = totals(demoBuild());
+    expect(t.filled).toBe(7);
+    expect(t.missing).toEqual(['gpu']);
+    expect(formatYuan(t.totalCents)).toBe('¥3,944');
+    expect(formatYuan(t.remainingCents)).toBe('¥4,056');
+  });
+});
+
+describe('配置操作', () => {
+  it('加入已确认显卡后计入合计', () => {
+    const b = buildReducer(demoBuild(), { type: 'addCandidate', candidate: candidateById('gpu-galax')!, priceCents: 399900, priceSource: 'demo' });
+    expect(totals(b).totalCents).toBe(394400 + 399900);
+    expect(totals(b).filled).toBe(8);
+  });
+
+  it('锁定的槽位不会被替换、移出或改价', () => {
+    let b = demoBuild();
+    const before = b.slots.cpu;
+    b = buildReducer(b, { type: 'addCandidate', candidate: candidateById('cpu-14600kf')!, priceCents: 129900, priceSource: 'manual' });
+    b = buildReducer(b, { type: 'removePart', slot: 'cpu' });
+    b = buildReducer(b, { type: 'setPartPrice', slot: 'cpu', priceCents: 1 });
+    expect(b.slots.cpu).toBe(before);
+  });
+
+  it('价格未知与 0 元分开：未知不计入合计但计数', () => {
+    let b = buildReducer(demoBuild(), { type: 'setPartPrice', slot: 'ssd', priceCents: null });
+    expect(totals(b).unknownPriceCount).toBe(1);
+    expect(totals(b).totalCents).toBe(394400 - 39900);
+    b = buildReducer(b, { type: 'setPartPrice', slot: 'ssd', priceCents: 0 });
+    expect(totals(b).unknownPriceCount).toBe(0);
+  });
+
+  it('预算限制在合理区间', () => {
+    expect(buildReducer(demoBuild(), { type: 'setBudget', cents: -5 }).budgetCents).toBe(300000);
+  });
+});
+
+describe('估算价', () => {
+  const est = { ...candidateById('gpu-galax')!, id: 'catalog:zol-1', source: 'catalog' as const, catalogId: 'zol-1', url: 'https://detail.zol.com.cn/1/1/param.shtml',
+    estimate: { cents: 438900, basis: 'reference' as const, samples: 1, observedAt: null } };
+
+  it('按估算价加入计入合计，并单独计数', () => {
+    const b = buildReducer(demoBuild(), { type: 'addCandidate', candidate: est, priceCents: 438900, priceSource: 'estimate', note: 'x' });
+    expect(totals(b)).toMatchObject({ totalCents: 394400 + 438900, estimateCount: 1 });
+    expect(b.slots.gpu.part).toMatchObject({ priceSource: 'estimate', catalogId: 'zol-1' });
+  });
+
+  it('刷新只改估算价；改成手动价或锁定后不再被刷新', () => {
+    let b = buildReducer(demoBuild(), { type: 'addCandidate', candidate: est, priceCents: 438900, priceSource: 'estimate', note: 'x' });
+    b = buildReducer(b, { type: 'setEstimate', slot: 'gpu', priceCents: 419900, note: 'y' });
+    expect(b.slots.gpu.part?.priceCents).toBe(419900);
+    const manual = buildReducer(b, { type: 'setPartPrice', slot: 'gpu', priceCents: 400000 });
+    expect(buildReducer(manual, { type: 'setEstimate', slot: 'gpu', priceCents: 1, note: '' }).slots.gpu.part?.priceCents).toBe(400000);
+    const locked = buildReducer(b, { type: 'toggleLock', slot: 'gpu' });
+    expect(buildReducer(locked, { type: 'setEstimate', slot: 'gpu', priceCents: 1, note: '' }).slots.gpu.part?.priceCents).toBe(419900);
+  });
+});
+
+describe('候选过滤', () => {
+  const gpus = DEMO_CANDIDATES.filter(c => c.slot === 'gpu');
+  it('查询中的 16GB 作为显存约束，8GB 进入已过滤', () => {
+    const r = applyFilters(gpus, { query: 'RTX 5060 Ti 16GB', condition: 'new', store: 'jd', capacity: 'all' });
+    expect(r.shown.map(c => c.id)).toEqual(['gpu-galax', 'gpu-asus', 'gpu-colorful']);
+    expect(r.filtered).toEqual([{ candidate: candidateById('gpu-maxsun-8g'), reason: '显存不符' }]);
+  });
+  it('关键词不相关的商品不展示也不算过滤', () => {
+    const r = applyFilters(gpus, { query: '影驰', condition: 'new', store: 'jd', capacity: 'all' });
+    expect(r.shown).toHaveLength(1);
+    expect(r.filtered).toHaveLength(0);
+  });
+});
+
+describe('兼容性', () => {
+  it('缺显卡时功耗保留未知，BIOS 待确认', () => {
+    const labels = compatibility(demoBuild()).map(c => c.label);
+    expect(labels).toEqual(['接口一致', 'BIOS 待确认', '散热器可装入', '主板可装入', '功耗待补齐显卡后估算']);
+  });
+  it('显卡超过机箱限长时报错，装得下时给出余量', () => {
+    const ok = buildReducer(demoBuild(), { type: 'addCandidate', candidate: candidateById('gpu-galax')!, priceCents: 399900, priceSource: 'demo' });
+    expect(compatibility(ok).find(c => c.id === 'gpuFit')).toMatchObject({ level: 'ok', label: '显卡可装入' });
+    expect(compatibility(ok).find(c => c.id === 'coolerFit')).toMatchObject({ level: 'ok' });
+    const long = { ...candidateById('gpu-galax')!, id: 'long', url: 'https://example.com/long', specs: { lengthMm: 361 } };
+    const bad = buildReducer(ok, { type: 'addCandidate', candidate: long, priceCents: 1, priceSource: 'manual' });
+    expect(compatibility(bad).find(c => c.id === 'gpuFit')).toMatchObject({ level: 'error', label: '显卡装不下' });
+  });
+  it('插槽不一致报错', () => {
+    let b = buildReducer(demoBuild(), { type: 'toggleLock', slot: 'cpu' });
+    b = buildReducer(b, { type: 'addCandidate', candidate: candidateById('cpu-14600kf')!, priceCents: 129900, priceSource: 'manual' });
+    expect(compatibility(b)[0]).toMatchObject({ level: 'error', label: '接口不一致' });
+  });
+});
+
+describe('金额解析', () => {
+  it.each([['3999', 399900], ['3,999.5', 399950], ['0', 0], ['¥ 12', 1200], ['abc', null], ['1.234', null]])('%s → %s', (input, out) => {
+    expect(parseYuan(input)).toBe(out);
+  });
+});

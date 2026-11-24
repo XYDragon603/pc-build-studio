@@ -1,0 +1,22 @@
+{
+  "name": "pc-pricing-validation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.mjs",
+    "catalog:import": "node scripts/import-buildcores.mjs",
+    "catalog:zol": "node scripts/import-zol.mjs",
+    "catalog:prices": "node scripts/import-zol.mjs --prices",
+    "jd:check": "node --env-file-if-exists=.env scripts/jd-check.mjs",
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "demo": "node scripts/replay.mjs",
+    "probe": "node scripts/probe-pages.mjs",
+    "search": "node --env-file-if-exists=.env src/cli.mjs",
+    "web": "npm --prefix web run dev",
+    "web:test": "npm --prefix web test"
+  }
+}

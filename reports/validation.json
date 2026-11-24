@@ -1,0 +1,342 @@
+{
+  "mode": "replay",
+  "generatedAt": "2026-11-23T14:19:20.484Z",
+  "evidenceAsOf": "2026-11-23T14:10:30.000Z",
+  "summary": {
+    "total": 7,
+    "accepted": 0,
+    "review": 7,
+    "rejected": 0
+  },
+  "results": [
+    {
+      "title": "AMD 锐龙 7 9700X 盒装CPU",
+      "url": "https://item.jd.com/product/P1v1mUNZZMMi7YHNd38fgQ.html",
+      "category": "CPU",
+      "model": "RYZEN 9700X",
+      "capacityGB": null,
+      "priceCents": 172900,
+      "currency": "CNY",
+      "observedAt": "2026-11-23T14:10:30.000Z",
+      "method": "manual-web-observation",
+      "sku": null,
+      "status": "review",
+      "autoEligible": false,
+      "reasonCodes": [
+        "conditional_price",
+        "manual_observation",
+        "unstructured_page",
+        "sku_unverified",
+        "stock_unknown",
+        "condition_unknown"
+      ],
+      "reasons": [
+        "价格依赖登录、优惠券、会员、补贴、定金或其他条件",
+        "人工浏览记录，只供验证回放",
+        "页面缺少可验证的单商品结构化报价",
+        "尚未将价格绑定到明确SKU",
+        "库存状态未确认",
+        "商品是否为新品未确认"
+      ],
+      "evidence": {
+        "title": "AMD 锐龙 7 9700X 盒装CPU",
+        "url": "https://item.jd.com/product/P1v1mUNZZMMi7YHNd38fgQ.html",
+        "excerpt": "¥1729.00 登录查看到手价",
+        "price": "1729.00",
+        "currency": "CNY",
+        "priceScope": "primary-product",
+        "method": "manual-web-observation",
+        "pageState": "readable",
+        "notes": "可见页面标价；到手价需登录，商家、库存与具体SKU未独立确认。",
+        "observedAt": "2026-11-23T14:10:30.000Z"
+      },
+      "target": "9700X 盒装"
+    },
+    {
+      "title": "AMD 锐龙 7 9700X 盒装CPU",
+      "url": "https://ic-item.jd.com/100371461200.html",
+      "category": "CPU",
+      "model": "RYZEN 9700X",
+      "capacityGB": null,
+      "priceCents": null,
+      "currency": null,
+      "observedAt": "2026-11-23T14:10:30.000Z",
+      "method": "manual-web-observation",
+      "sku": null,
+      "status": "review",
+      "autoEligible": false,
+      "reasonCodes": [
+        "price_missing",
+        "currency_unknown",
+        "manual_observation",
+        "unstructured_page",
+        "sku_unverified",
+        "stock_unknown",
+        "condition_unknown"
+      ],
+      "reasons": [
+        "没有可归属到当前商品的价格",
+        "未确认人民币价格",
+        "人工浏览记录，只供验证回放",
+        "页面缺少可验证的单商品结构化报价",
+        "尚未将价格绑定到明确SKU",
+        "库存状态未确认",
+        "商品是否为新品未确认"
+      ],
+      "evidence": {
+        "title": "AMD 锐龙 7 9700X 盒装CPU",
+        "url": "https://ic-item.jd.com/100371461200.html",
+        "excerpt": "京东价字段没有可见数值",
+        "price": null,
+        "currency": null,
+        "method": "manual-web-observation",
+        "pageState": "readable",
+        "notes": "商品名称可见，但不能从页面文本取得价格。",
+        "observedAt": "2026-11-23T14:10:30.000Z"
+      },
+      "target": "9700X 盒装"
+    },
+    {
+      "title": "影驰 RTX 5060 Ti 金属大师 MAX 白 OC 16G",
+      "url": "https://item.jd.com/product/Bt661uYAHVd-inmnSOmaYA.html",
+      "category": "GPU",
+      "model": "RTX 5060 TI",
+      "capacityGB": 16,
+      "priceCents": null,
+      "currency": null,
+      "observedAt": "2026-11-23T14:10:30.000Z",
+      "method": "manual-web-observation",
+      "sku": null,
+      "status": "review",
+      "autoEligible": false,
+      "reasonCodes": [
+        "price_missing",
+        "currency_unknown",
+        "manual_observation",
+        "recommendation_prices",
+        "unstructured_page",
+        "sku_unverified",
+        "stock_unknown",
+        "condition_unknown"
+      ],
+      "reasons": [
+        "没有可归属到当前商品的价格",
+        "未确认人民币价格",
+        "人工浏览记录，只供验证回放",
+        "只能看到推荐商品价格，不能作为当前商品报价",
+        "页面缺少可验证的单商品结构化报价",
+        "尚未将价格绑定到明确SKU",
+        "库存状态未确认",
+        "商品是否为新品未确认"
+      ],
+      "evidence": {
+        "title": "影驰 RTX 5060 Ti 金属大师 MAX 白 OC 16G",
+        "url": "https://item.jd.com/product/Bt661uYAHVd-inmnSOmaYA.html",
+        "excerpt": "可见看了又看推荐区，不能将其中价格绑定到当前商品",
+        "price": null,
+        "currency": null,
+        "priceScope": "recommendations",
+        "method": "manual-web-observation",
+        "pageState": "readable",
+        "notes": "商品页包含多个型号的推荐卡片，不提取推荐区价格。",
+        "observedAt": "2026-11-23T14:10:30.000Z"
+      },
+      "target": "RTX 5060 Ti 16GB"
+    },
+    {
+      "title": "影驰 RTX 5060 Ti 星曜 LUNA MAX OC 16G",
+      "url": "https://item.jd.com/product/k0VRwpTHmkN1oXd4wozvaA.html",
+      "category": "GPU",
+      "model": "RTX 5060 TI",
+      "capacityGB": 16,
+      "priceCents": null,
+      "currency": null,
+      "observedAt": "2026-11-23T14:10:30.000Z",
+      "method": "manual-web-observation",
+      "sku": null,
+      "status": "review",
+      "autoEligible": false,
+      "reasonCodes": [
+        "price_missing",
+        "currency_unknown",
+        "manual_observation",
+        "unstructured_page",
+        "sku_unverified",
+        "stock_unknown",
+        "condition_unknown"
+      ],
+      "reasons": [
+        "没有可归属到当前商品的价格",
+        "未确认人民币价格",
+        "人工浏览记录，只供验证回放",
+        "页面缺少可验证的单商品结构化报价",
+        "尚未将价格绑定到明确SKU",
+        "库存状态未确认",
+        "商品是否为新品未确认"
+      ],
+      "evidence": {
+        "title": "影驰 RTX 5060 Ti 星曜 LUNA MAX OC 16G",
+        "url": "https://item.jd.com/product/k0VRwpTHmkN1oXd4wozvaA.html",
+        "excerpt": "商品名称可见，未取得当前商品报价",
+        "price": null,
+        "currency": null,
+        "method": "manual-web-observation",
+        "pageState": "readable",
+        "notes": "页面文本不足以确认价格、库存和SKU。",
+        "observedAt": "2026-11-23T14:10:30.000Z"
+      },
+      "target": "RTX 5060 Ti 16GB"
+    },
+    {
+      "title": "技嘉 RTX 5060 Ti 16GB（仅检索线索）",
+      "url": "https://item.jd.com/100253509694.html",
+      "category": "GPU",
+      "model": "RTX 5060 TI",
+      "capacityGB": 16,
+      "priceCents": null,
+      "currency": null,
+      "observedAt": "2026-11-23T14:10:30.000Z",
+      "method": "manual-web-observation",
+      "sku": null,
+      "status": "review",
+      "autoEligible": false,
+      "reasonCodes": [
+        "price_missing",
+        "currency_unknown",
+        "manual_observation",
+        "page_blocked",
+        "unstructured_page",
+        "sku_unverified",
+        "stock_unknown",
+        "condition_unknown"
+      ],
+      "reasons": [
+        "没有可归属到当前商品的价格",
+        "未确认人民币价格",
+        "人工浏览记录，只供验证回放",
+        "商品页返回访问限制或浏览器验证提示",
+        "页面缺少可验证的单商品结构化报价",
+        "尚未将价格绑定到明确SKU",
+        "库存状态未确认",
+        "商品是否为新品未确认"
+      ],
+      "evidence": {
+        "title": "技嘉 RTX 5060 Ti 16GB（仅检索线索）",
+        "url": "https://item.jd.com/100253509694.html",
+        "excerpt": "请您使用高版本浏览器",
+        "price": null,
+        "currency": null,
+        "method": "manual-web-observation",
+        "pageState": "blocked",
+        "notes": "标题来自检索发现，商品页仅返回浏览器提示，商品身份也未验证。",
+        "observedAt": "2026-11-23T14:10:30.000Z"
+      },
+      "target": "RTX 5060 Ti 16GB"
+    },
+    {
+      "title": "七彩虹 RTX 5060 Ti 16GB（仅检索线索）",
+      "url": "https://item.jd.com/100245473299.html",
+      "category": "GPU",
+      "model": "RTX 5060 TI",
+      "capacityGB": 16,
+      "priceCents": null,
+      "currency": null,
+      "observedAt": "2026-11-23T14:10:30.000Z",
+      "method": "manual-web-observation",
+      "sku": null,
+      "status": "review",
+      "autoEligible": false,
+      "reasonCodes": [
+        "price_missing",
+        "currency_unknown",
+        "manual_observation",
+        "page_blocked",
+        "unstructured_page",
+        "sku_unverified",
+        "stock_unknown",
+        "condition_unknown"
+      ],
+      "reasons": [
+        "没有可归属到当前商品的价格",
+        "未确认人民币价格",
+        "人工浏览记录，只供验证回放",
+        "商品页返回访问限制或浏览器验证提示",
+        "页面缺少可验证的单商品结构化报价",
+        "尚未将价格绑定到明确SKU",
+        "库存状态未确认",
+        "商品是否为新品未确认"
+      ],
+      "evidence": {
+        "title": "七彩虹 RTX 5060 Ti 16GB（仅检索线索）",
+        "url": "https://item.jd.com/100245473299.html",
+        "excerpt": "请您使用高版本浏览器",
+        "price": null,
+        "currency": null,
+        "method": "manual-web-observation",
+        "pageState": "blocked",
+        "notes": "链接通过其他页面发现，商品页仅返回浏览器提示。",
+        "observedAt": "2026-11-23T14:10:30.000Z"
+      },
+      "target": "RTX 5060 Ti 16GB"
+    },
+    {
+      "title": "华硕 RTX5060Ti O8G/O16G 显卡 大师PRIME O8G",
+      "url": "https://item.jd.com/product/Ci-A5lreSlyqLlTL8aEVgQ.html",
+      "category": "GPU",
+      "model": "RTX 5060 TI",
+      "capacityGB": null,
+      "priceCents": null,
+      "currency": null,
+      "observedAt": "2026-11-23T14:10:30.000Z",
+      "method": "manual-web-observation",
+      "sku": null,
+      "status": "review",
+      "autoEligible": false,
+      "reasonCodes": [
+        "memory_ambiguous",
+        "price_missing",
+        "currency_unknown",
+        "manual_observation",
+        "unstructured_page",
+        "sku_unverified",
+        "stock_unknown",
+        "condition_unknown"
+      ],
+      "reasons": [
+        "显存容量缺失或包含多个选项",
+        "没有可归属到当前商品的价格",
+        "未确认人民币价格",
+        "人工浏览记录，只供验证回放",
+        "页面缺少可验证的单商品结构化报价",
+        "尚未将价格绑定到明确SKU",
+        "库存状态未确认",
+        "商品是否为新品未确认"
+      ],
+      "evidence": {
+        "title": "华硕 RTX5060Ti O8G/O16G 显卡 大师PRIME O8G",
+        "url": "https://item.jd.com/product/Ci-A5lreSlyqLlTL8aEVgQ.html",
+        "excerpt": "标题含8G和16G选项，未确认选中规格及报价",
+        "price": null,
+        "currency": null,
+        "method": "manual-web-observation",
+        "pageState": "readable",
+        "notes": "不能因目标是16GB就忽略商品标题末尾的8G规格。",
+        "observedAt": "2026-11-23T14:10:30.000Z"
+      },
+      "target": "RTX 5060 Ti 16GB"
+    }
+  ],
+  "cost": {
+    "projectSearchRequests": 0,
+    "productPageRequests": 0,
+    "cacheHits": 0,
+    "estimatedGrossUsd": null
+  },
+  "notes": [
+    "助手通过网页搜索与页面打开工具人工检查后，摘录与报价验证相关的少量字段；这是固定记录，不是Brave API原始响应。标题经过缩写，不保存用户评论和整页内容。",
+    "本次回放不联网；判定新鲜度使用原始采集时刻，不能把回放生成时间当作重新查价时间。",
+    "原始实查由助手工具完成，其调用费用不可归因到项目API；本轮未验证Brave的中文商品检索质量、延迟或实际账单。",
+    "7个页面是小规模定向样本，不能用其通过率估计整个市场的可用率。",
+    "下一步先评估可提供明确SKU、库存和报价时间的数据源；当前记录不支持无人审核自动入槽。"
+  ]
+}

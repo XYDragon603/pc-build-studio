@@ -1,0 +1,182 @@
+/**
+ * 本地 API v1 客户端（docs/api.md）。开发与预览时由 Vite 代理 /api 到 127.0.0.1:4310。
+ */
+const BASE = '/api/v1';
+
+export class ApiError extends Error {
+  constructor(public status: number, public code: string, message: string) {
+    super(message);
+  }
+}
+
+export interface ApiSpecs {
+  socket?: string;
+  memoryType?: string;
+  maxPowerWatts?: number;
+  ratedWatts?: number;
+}
+
+export interface ApiPart {
+  model: string;
+  catalogId?: string | null;
+  spec?: string;
+  priceCents: number | null;
+  quantity: number;
+  priceSource: 'manual' | 'demo' | 'estimate';
+  note: string;
+  url: string | null;
+  specs: ApiSpecs;
+}
+
+export interface ApiSlot {
+  id: string;
+  label: string;
+  locked: boolean;
+  part: ApiPart | null;
+}
+
+export interface ApiBuildInput {
+  name: string;
+  budgetCents: number;
+  scenarios: string[];
+  slots: ApiSlot[];
+}
+
+export interface ApiTotals {
+  totalCents: number;
+  remainingCents: number;
+  unknownPriceCount: number;
+  filledStandardSlots: number;
+}
+
+export interface ApiBuild extends ApiBuildInput {
+  id: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  totals: ApiTotals;
+}
+
+export type ApiTemplate = ApiBuildInput & { totals: ApiTotals };
+
+export interface ApiBuildSummary {
+  id: string;
+  name: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  budgetCents: number;
+  totals: ApiTotals;
+}
+
+export type QuoteMode = 'replay' | 'live';
+
+export interface Quote {
+  title: string;
+  category: 'CPU' | 'GPU';
+  model: string | null;
+  capacityGB: number | null;
+  priceCents: number | null;
+  currency: string | null;
+  observedAt: string | null;
+  sku: string | null;
+  status: 'accepted' | 'review' | 'rejected';
+  autoEligible: boolean;
+  reasonCodes: string[];
+  reasons: string[];
+  method: string;
+  url: string | null;
+}
+
+export interface QuoteReport {
+  mode: QuoteMode;
+  generatedAt: string;
+  evidenceAsOf?: string;
+  target: { category: string; query: string; model: string; capacityGB: number | null; packaging: string | null };
+  summary: { total: number; accepted: number; review: number; rejected: number };
+  results: Quote[];
+  cost: { projectSearchRequests: number; productPageRequests: number; cacheHits: number; estimatedGrossUsd: number | null };
+}
+
+export interface CatalogItem {
+  id: string;
+  category: string;
+  name: string;
+  manufacturer: string | null;
+  mpn: string | null;
+  summary: string;
+  aliases: string[];
+  specs: Record<string, string | number | boolean | string[] | undefined>;
+  imageUrl: string | null;
+  sourceUrl: string;
+  dataSource?: 'buildcores' | 'zol';
+  zolId?: string;
+  /** ZOL 参考价，非实时 */
+  referencePriceCents?: number | null;
+  priceObservedAt?: string | null;
+  /** 估算价：reference = ZOL 参考价；chip-median = 同芯片同显存中位价 */
+  estimatedPriceCents?: number;
+  estimateBasis?: 'reference' | 'chip-median';
+  estimateSamples?: number;
+}
+
+export interface CatalogPage {
+  items: CatalogItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface JdLookup {
+  items: { skuId: string; name: string; unitPriceCents: number | null; mobilePriceCents: number | null; url: string; imageUrl: string | null; isJdSale: boolean; observedAt: string }[];
+  /** 未返回的 SKU：多半不在联盟推广中，不代表没有价格 */
+  missing: string[];
+  observedAt: string;
+  cached: boolean;
+}
+
+export interface Health {
+  status: 'ok';
+  apiVersion: string;
+  quotes: { liveConfigured: boolean; modes: QuoteMode[]; categories: string[]; jdUnionConfigured?: boolean };
+}
+
+async function call<T>(path: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(BASE + path, {
+      method: init.method ?? 'GET',
+      headers: init.body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      signal: AbortSignal.timeout(init.timeoutMs ?? 15000),
+    });
+  } catch (e) {
+    const timeout = e instanceof DOMException && e.name === 'TimeoutError';
+    throw new ApiError(0, timeout ? 'TIMEOUT' : 'NETWORK', timeout ? '请求超时，请稍后重试' : '无法连接本地服务');
+  }
+  if (res.status === 204) return undefined as T;
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    // 代理在后端未启动时返回 5xx 且没有 JSON 错误体
+    if (!data?.error) throw new ApiError(res.status, 'NETWORK', '无法连接本地服务');
+    throw new ApiError(res.status, data.error.code, data.error.message);
+  }
+  return data as T;
+}
+
+export const api = {
+  health: () => call<Health>('/health', { timeoutMs: 4000 }),
+  template: () => call<ApiTemplate>('/templates/demo'),
+  listBuilds: () => call<{ items: ApiBuildSummary[] }>('/builds').then(r => r.items),
+  getBuild: (id: string) => call<ApiBuild>(`/builds/${id}`),
+  createBuild: (input: ApiBuildInput) => call<ApiBuild>('/builds', { method: 'POST', body: input }),
+  updateBuild: (id: string, input: ApiBuildInput & { version: number }) => call<ApiBuild>(`/builds/${id}`, { method: 'PUT', body: input }),
+  deleteBuild: (id: string, version: number) => call<void>(`/builds/${id}`, { method: 'DELETE', body: { version } }),
+  jdPrices: (skuIds: string[]) => call<JdLookup>('/quotes/jd', { method: 'POST', body: { skuIds }, timeoutMs: 15000 }),
+  catalogItem: (id: string) => call<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),
+  catalog: (category: string, q: string, limit = 24) =>
+    call<CatalogPage>(`/catalog?${new URLSearchParams({ category, q: q.trim().slice(0, 120), limit: String(limit) })}`),
+  // 实时检索会逐个读取商品页（每页最多 10 秒），给足时间
+  searchQuotes: (category: 'CPU' | 'GPU', query: string, mode: QuoteMode) =>
+    call<QuoteReport>('/quotes/search', { method: 'POST', body: { category, query, mode }, timeoutMs: mode === 'live' ? 150000 : 15000 }),
+};
