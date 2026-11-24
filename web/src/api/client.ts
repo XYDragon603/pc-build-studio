@@ -145,6 +145,14 @@ export interface JdLookup {
   cached: boolean;
 }
 
+export interface RecommendResult {
+  budgetCents: number;
+  totalCents: number;
+  lockedCents: number;
+  picks: { slot: string; reason: string; item: CatalogItem }[];
+  notes: string[];
+}
+
 export interface Health {
   status: 'ok';
   apiVersion: string;
@@ -183,6 +191,8 @@ export const api = {
   updateBuild: (id: string, input: ApiBuildInput & { version: number }) => call<ApiBuild>(`/builds/${id}`, { method: 'PUT', body: input }),
   deleteBuild: (id: string, version: number) => call<void>(`/builds/${id}`, { method: 'DELETE', body: { version } }),
   jdPrices: (skuIds: string[]) => call<JdLookup>('/quotes/jd', { method: 'POST', body: { skuIds }, timeoutMs: 15000 }),
+  recommend: (body: { budgetCents: number; scenarios: string[]; locked: Record<string, { priceCents: number; specs: object }> }) =>
+    call<RecommendResult>('/recommend', { method: 'POST', body, timeoutMs: 20000 }),
   catalogItem: (id: string) => call<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),
   catalog: (category: string, q: string, limit = 24) =>
     call<CatalogPage>(`/catalog?${new URLSearchParams({ category, q: q.trim().slice(0, 120), limit: String(limit) })}`),

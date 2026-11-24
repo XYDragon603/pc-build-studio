@@ -7,6 +7,7 @@ import { BraveSearch } from './search.mjs';
 import { LocalStore } from './store.mjs';
 import { createCatalog } from './catalog.mjs';
 import { JdUnion } from './jdunion.mjs';
+import { recommend, SLOTS as RECOMMEND_SLOTS } from './recommend.mjs';
 
 const localHosts = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const bodyLimit = 64 * 1024;
@@ -108,6 +109,19 @@ export function createApiServer({ directory, catalogDirectory = directory,
         response.writeHead(204).end();
         return;
       }
+      if (pathname === '/api/v1/recommend' && method === 'POST') {
+        const { budgetCents, scenarios = [], locked = {} } = await readJson(request);
+        if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
+        if (!Array.isArray(scenarios) || scenarios.length > 8 || !scenarios.every(s => typeof s === 'string' && s.length <= 32)) throw invalid('scenarios 格式无效');
+        if (!locked || typeof locked !== 'object' || Array.isArray(locked)) throw invalid('locked 必须为对象');
+        const lockedParts = {};
+        for (const [slot, part] of Object.entries(locked)) {
+          if (!RECOMMEND_SLOTS.includes(slot)) throw invalid('locked 只能包含标准槽位');
+          if (!part || typeof part !== 'object' || (part.priceCents != null && !Number.isSafeInteger(part.priceCents))) throw invalid('locked 配件格式无效');
+          lockedParts[slot] = { priceCents: part.priceCents ?? 0, specs: part.specs && typeof part.specs === 'object' ? part.specs : {} };
+        }
+        return json(response, 200, recommend(catalog.all(), { budgetCents, scenarios, locked: lockedParts }));
+      }
       if (pathname === '/api/v1/quotes/jd' && method === 'POST') {
         const { skuIds } = await readJson(request);
         return json(response, 200, await jdUnion.lookup(skuIds));
@@ -130,7 +144,7 @@ export function createApiServer({ directory, catalogDirectory = directory,
       }
 
       const allowed = singleBuild ? 'GET, PUT, DELETE' : singleProduct ? 'GET' : {
-        '/api/v1/builds': 'GET, POST', '/api/v1/quotes/search': 'POST', '/api/v1/quotes/jd': 'POST',
+        '/api/v1/builds': 'GET, POST', '/api/v1/quotes/search': 'POST', '/api/v1/quotes/jd': 'POST', '/api/v1/recommend': 'POST',
         '/api/v1/catalog': 'GET',
         '/api/v1/health': 'GET', '/api/v1/slot-types': 'GET', '/api/v1/templates/demo': 'GET',
       }[pathname];

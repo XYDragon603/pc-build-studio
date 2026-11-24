@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Gamepad2, VolumeX } from 'lucide-react';
+import { ChevronDown, ChevronUp, Gamepad2, Sparkles, VolumeX } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { BUDGET_MAX, BUDGET_MIN } from '../domain/build';
 import { SCENARIOS } from '../domain/scenarios';
@@ -13,9 +13,11 @@ interface Props {
   onBudget: (cents: number) => void;
   onRename: (name: string) => void;
   onScenario: (key: string) => void;
+  /** 按预算自动配（需要连接本地服务） */
+  onAutoBuild?: () => void;
 }
 
-export function Hero({ build, title, onBudget, onRename, onScenario }: Props) {
+export function Hero({ build, title, onBudget, onRename, onScenario, onAutoBuild }: Props) {
   const [text, setText] = useState(String(build.budgetCents / 100));
   const [focused, setFocused] = useState(false);
   useEffect(() => setText(String(build.budgetCents / 100)), [build.budgetCents]);
@@ -78,6 +80,12 @@ export function Hero({ build, title, onBudget, onRename, onScenario }: Props) {
           />
         </div>
       </div>
+
+      {onAutoBuild && (
+        <button type="button" className="btn btn-outline auto-build" onClick={onAutoBuild} title="按预算和用途从型号目录挑一套兼容配置">
+          <Sparkles size={18} /> 按预算自动配
+        </button>
+      )}
 
       <div className="hero-scenarios">
         <span className="eyebrow" id="scenario-label">使用场景</span>

@@ -170,6 +170,10 @@ export function createCatalog(directory = '.runtime') {
   }));
 
   return {
+    /** 全部条目（不含原始参数表），供自动配置使用 */
+    all() {
+      return items.map(brief);
+    },
     list(params) {
       const query = (params.get('q') ?? '').trim();
       if (query.length > 120) throw invalid('q 最长 120 个字符');

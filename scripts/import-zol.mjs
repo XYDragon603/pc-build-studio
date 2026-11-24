@@ -10,7 +10,7 @@
 // - 每次联网请求之间至少间隔 --delay 毫秒（默认 2500），原始 HTML 缓存在 .runtime/zol-cache，重跑不重复请求。
 // - 遇到 403 / 429 / 验证页立即停止，不重试、不绕过。
 // - 输出 .runtime/zol-catalog.json，记录格式与 BuildCores 导入一致；多次运行按 id 累积。
-import { appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -565,8 +565,38 @@ async function main() {
   }, null, 2));
 }
 
+/**
+ * 同一时间只允许一个 ZOL 任务（导入或刷新价格）：两者都会整体改写快照，并发会互相覆盖。
+ * 超过 3 小时的锁视为上次异常退出残留，自动清除。
+ */
+async function withLock(run) {
+  const lockFile = path.resolve('.runtime/zol.lock');
+  await mkdir(path.dirname(lockFile), { recursive: true });
+  let handle;
+  try {
+    handle = await open(lockFile, 'wx');
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    const age = Date.now() - (await stat(lockFile)).mtimeMs;
+    if (age < 3 * 3600 * 1000) {
+      console.error('另一个 ZOL 任务正在运行（.runtime/zol.lock），本次跳过。确认没有任务在跑后可删除该文件。');
+      process.exitCode = 3;
+      return;
+    }
+    await unlink(lockFile);
+    handle = await open(lockFile, 'wx');
+  }
+  try {
+    await handle.writeFile(`${process.pid} ${new Date().toISOString()}\n`);
+    await run();
+  } finally {
+    await handle.close();
+    await unlink(lockFile).catch(() => {});
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  main().catch(error => {
+  withLock(main).catch(error => {
     console.error(error instanceof Blocked ? error.message : error);
     process.exitCode = 1;
   });

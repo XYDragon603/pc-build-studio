@@ -6,6 +6,10 @@ import { CompatStrip } from './components/CompatStrip';
 import { CustomPartDialog } from './components/CustomPartDialog';
 import { Hero } from './components/Hero';
 import { PlansDialog, type PlanSummary } from './components/PlansDialog';
+import { RecommendDialog } from './components/RecommendDialog';
+import { API_TO_SLOT } from './api/mapping';
+import { catalogToCandidate } from './domain/catalog';
+import type { RecommendResult } from './api/client';
 import { PriceDialog, type PriceOrigin, type PriceRequest } from './components/PriceDialog';
 import { StepNav } from './components/StepNav';
 import { Summary, type PriceAlert } from './components/Summary';
@@ -305,6 +309,19 @@ export default function App() {
   };
 
   const [refreshing, setRefreshing] = useState(false);
+  const [recommendOpen, setRecommendOpen] = useState(false);
+
+  /** 应用自动配置：只替换未锁定的配件，按估算价加入 */
+  const applyRecommendation = (r: RecommendResult) => {
+    let applied = 0;
+    for (const pick of r.picks) {
+      const slot = API_TO_SLOT[pick.slot];
+      if (!slot || build.slots[slot].locked || !pick.item.estimatedPriceCents) continue;
+      dispatch({ type: 'addCandidate', candidate: catalogToCandidate(pick.item, slot), priceCents: pick.item.estimatedPriceCents, priceSource: 'estimate', note: `自动配置：${pick.reason}` });
+      applied++;
+    }
+    setToast(`已按预算配好 ${applied} 件，价格均为估算，可逐项调整`);
+  };
   const [alerts, setAlerts] = useState<PriceAlert[]>([]);
 
   // 价格提醒：已选配件对应的目录参考价有变化时提示（估算价可一键刷新；手动价只提示，不改）
@@ -380,6 +397,7 @@ export default function App() {
           onBudget={cents => dispatch({ type: 'setBudget', cents })}
           onRename={name => dispatch({ type: 'rename', name })}
           onScenario={key => dispatch({ type: 'toggleScenario', key })}
+          onAutoBuild={online ? () => setRecommendOpen(true) : undefined}
         />
         <div className="layout">
           <div className="main-col">
@@ -420,6 +438,7 @@ export default function App() {
       </main>
 
       <PriceDialog request={priceReq} jdEnabled={online && jdConfigured} onClose={() => setPriceReq(null)} />
+      <RecommendDialog open={recommendOpen} build={build} onClose={() => setRecommendOpen(false)} onApply={applyRecommendation} />
       <CustomPartDialog open={customOpen} onClose={() => setCustomOpen(false)} onAdd={part => dispatch({ type: 'addCustom', part })} />
       <PlansDialog
         open={plansOpen}

@@ -5,7 +5,7 @@ import type { ApiBuild, ApiBuildInput, ApiPart, ApiSlot, ApiTemplate } from './c
 export const SLOT_TO_API: Record<SlotId, string> = {
   cpu: 'CPU', gpu: 'GPU', board: 'MOTHERBOARD', ram: 'RAM', ssd: 'SSD', psu: 'PSU', case: 'CASE', cooler: 'COOLER',
 };
-const API_TO_SLOT = Object.fromEntries(Object.entries(SLOT_TO_API).map(([k, v]) => [v, k])) as Record<string, SlotId>;
+export const API_TO_SLOT = Object.fromEntries(Object.entries(SLOT_TO_API).map(([k, v]) => [v, k])) as Record<string, SlotId>;
 
 function partToApi(p: Part): ApiPart {
   return {
