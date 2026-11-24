@@ -161,6 +161,17 @@ export interface RecommendResult {
   notes: string[];
 }
 
+/** POST /plans 返回的一套方案（省钱版 / 推荐版 / 进阶版） */
+export interface PlanResult extends RecommendResult {
+  id: 'save' | 'balanced' | 'plus';
+  label: string;
+  targetCents: number;
+  /** 核显方案：不配独立显卡 */
+  igpu: boolean;
+  /** 盒装 CPU 自带散热器，不另买 */
+  stockCooler: boolean;
+}
+
 export interface Health {
   status: 'ok';
   apiVersion: string;
@@ -199,6 +210,8 @@ export const api = {
   updateBuild: (id: string, input: ApiBuildInput & { version: number }) => call<ApiBuild>(`/builds/${id}`, { method: 'PUT', body: input }),
   deleteBuild: (id: string, version: number) => call<void>(`/builds/${id}`, { method: 'DELETE', body: { version } }),
   jdPrices: (skuIds: string[]) => call<JdLookup>('/quotes/jd', { method: 'POST', body: { skuIds }, timeoutMs: 15000 }),
+  plans: (body: { budgetCents: number; scenarios: string[] }) =>
+    call<{ plans: PlanResult[] }>('/plans', { method: 'POST', body, timeoutMs: 30000 }).then(r => r.plans),
   recommend: (body: { budgetCents: number; scenarios: string[]; locked: Record<string, { priceCents: number; specs: object }> }) =>
     call<RecommendResult>('/recommend', { method: 'POST', body, timeoutMs: 20000 }),
   catalogItem: (id: string) => call<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),

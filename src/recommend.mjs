@@ -97,19 +97,54 @@ function dropPriceOutliers(category, pool) {
  * @param items  目录条目（含 estimatedPriceCents）
  * @param input  { budgetCents, scenarios, locked: { [SLOT]: { priceCents, specs } } }
  */
-export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
-  const pools = Object.fromEntries(SLOTS.map(s => [s, dropPriceOutliers(s, items.filter(i => i.category === s && price(i) > 0
-    // 明显错误的显卡长度（如 128mm）不参与挑选
-    && (s !== 'GPU' || ((i.specs.lengthMm ?? 0) >= 150 && i.specs.lengthMm <= 380))))]));
+/** 带核显的 CPU：ZOL 标注了集成显卡，或 AMD G 系列 / Intel 非 F 型号 */
+export function hasIntegratedGraphics(item) {
+  const name = up(item.name);
+  if (item.specs?.integratedGraphics) return true;
+  if (/RYZEN.*\d{4}G(T|E)?\b/.test(name)) return true;
+  if (/INTEL|酷睿|CORE/.test(name) && !/\d{3,5}K?F\b|KF\b/.test(name)) return true;
+  return false;
+}
+
+/**
+ * 超预算时整体收紧：按“预算 ÷ 估算总价”缩小各项分配后重挑，最多 4 轮，取不超预算里最贵的一次；都超就取最便宜的。
+ */
+export function recommend(items, input) {
+  let scale = 1;
+  const tries = [];
+  for (let i = 0; i < 5; i++) {
+    const r = recommendOnce(items, { ...input, capScale: scale });
+    tries.push(r);
+    if (r.totalCents <= input.budgetCents || !r.picks.length) break;
+    scale *= (input.budgetCents / r.totalCents) * 0.97;
+  }
+  const fitting = tries.filter(r => r.totalCents <= input.budgetCents);
+  const best = fitting.length ? fitting.sort((a, b) => b.totalCents - a.totalCents)[0] : tries.sort((a, b) => a.totalCents - b.totalCents)[0];
+  if (best !== tries[0] && best.totalCents <= input.budgetCents) best.notes.unshift('初选超出预算，已整体降低各项档次以控制在预算内。');
+  return best;
+}
+
+function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput = {}, igpu = false, capScale = 1 }) {
+  // 核显方案：显卡当作已确定、价格为 0，预算全部分给其他配件
+  const locked = igpu ? { ...lockedInput, GPU: { priceCents: 0, specs: {}, igpu: true } } : lockedInput;
+  const pools = Object.fromEntries(SLOTS.map(s => {
+    const valid = dropPriceOutliers(s, items.filter(i => i.category === s && price(i) > 0
+      // 明显错误的显卡长度（如 128mm）不参与挑选
+      && (s !== 'GPU' || ((i.specs.lengthMm ?? 0) >= 150 && i.specs.lengthMm <= 380))));
+    // 有商品图的足够多时只用有图的，方案里每一项都能配图
+    const withImage = valid.filter(i => i.imageUrl);
+    return [s, withImage.length >= 8 ? withImage : valid];
+  }));
   const notes = [];
   const picks = {};
+  let stockCoolerNote = null;
   const lockedCents = Object.values(locked).reduce((sum, p) => sum + (p.priceCents ?? 0), 0);
   const open = SLOTS.filter(s => !locked[s]);
   const weights = shares(scenarios);
   const weightSum = open.reduce((sum, s) => sum + weights[s], 0) || 1;
   const available = budgetCents - lockedCents;
   if (available <= 0) return { picks: [], totalCents: lockedCents, budgetCents, notes: ['已锁定配件已用完预算，没有可分配的金额。'] };
-  const cap = slot => Math.round((available * weights[slot]) / weightSum);
+  const cap = slot => Math.round((available * weights[slot] * capScale) / weightSum);
 
   /** 已选（含锁定）配件的规格 */
   const specsOf = slot => locked[slot]?.specs ?? picks[slot]?.item.specs ?? null;
@@ -117,7 +152,8 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
 
   // CPU
   if (!locked.CPU) {
-    const all = pools.CPU.filter(i => i.specs.socket && /^(AM5|AM4|LGA1700|LGA1851)$/.test(up(i.specs.socket)));
+    const all = pools.CPU.filter(i => i.specs.socket && /^(AM5|AM4|LGA1700|LGA1851)$/.test(up(i.specs.socket))
+      && (!igpu || hasIntegratedGraphics(i)));
     const current = all.filter(i => CURRENT_SOCKETS.test(up(i.specs.socket)));
     const currentFits = current.some(i => price(i) <= cap('CPU'));
     const pool = currentFits ? current : all;
@@ -147,6 +183,7 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
 
   // 内存：同代际；预算 ≥ ¥6,000 选 32GB，否则 16GB；双条优先；DDR5 要求 ≥ 6000 MT/s；挑最便宜
   if (!locked.RAM && memoryType) {
+    // 低预算 16GB；¥6,000 以上 32GB
     const targetGB = budgetCents >= 600000 ? 32 : 16;
     let pool = pools.RAM.filter(i => up(i.specs.memoryType) === memoryType && i.specs.capacityGB === targetGB);
     const dual = pool.filter(i => i.specs.modules === 2);
@@ -203,7 +240,8 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
       const gpu = specsOf('GPU') ?? {};
       const cpu = specsOf('CPU') ?? {};
       const est = cpu.maxPowerWatts && (gpu.maxPowerWatts ?? gpu.tdpWatts) ? Math.ceil((cpu.maxPowerWatts + (gpu.maxPowerWatts ?? gpu.tdpWatts) + 75) * 1.25) : 0;
-      const need = Math.max(gpu.recommendedPsuWatts ?? 0, est, 450);
+      // 核显机功耗低，300W 起；独显机 450W 起
+      const need = Math.max(gpu.recommendedPsuWatts ?? 0, est, igpu ? 300 : 450);
       let pool = pools.PSU.filter(i => (i.specs.ratedWatts ?? 0) >= need);
       const gold = pool.filter(i => /金|GOLD|白金|PLATINUM|钛金|TITANIUM/i.test(i.specs.efficiency ?? ''));
       if (scenarios.includes('quiet') && gold.length) pool = gold;
@@ -211,8 +249,16 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
       if (item) set('PSU', item, `需要 ≥ ${need}W${scenarios.includes('quiet') && gold.length ? '，安静优先选金牌及以上' : ''}，满足条件里最便宜`);
     }
 
+    // 原装散热：AMD 盒装、非 X / X3D 的型号自带散热器，¥5,000 以下且不要求安静时不再另买
+    const cpuItem = picks.CPU?.item;
+    const stockCooler = cpuItem && budgetCents < 500000 && !scenarios.includes('quiet')
+      && /盒/.test(cpuItem.specs.packaging ?? '') && /RYZEN/i.test(cpuItem.name) && !/\d{4}X/i.test(cpuItem.name);
+    if (!locked.COOLER && stockCooler) {
+      delete picks.COOLER;
+      stockCoolerNote = `${cpuItem.name} 盒装自带散热器，低预算方案不再另买散热器。`;
+    }
     // 散热：CPU 峰值 ≥ 150W 选 240/360 水冷，否则风冷塔式；插槽需支持；安静优先在预算内选最好的，否则最便宜
-    if (!locked.COOLER && socket) {
+    if (!locked.COOLER && socket && !stockCooler) {
       const peak = specsOf('CPU')?.maxPowerWatts ?? 0;
       const wantLiquid = peak >= 150;
       const fitting = pools.COOLER.filter(i => coolerFitsSocket(i, socket));
@@ -245,9 +291,12 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
     // 硬盘：预算 ≥ ¥10,000 选 2TB，否则 1TB；优先 PCIe 4.0 以上、读 ≥ 5000MB/s；挑最便宜
     if (!locked.SSD) {
       const near = gb => pools.SSD.filter(i => Math.abs((i.specs.capacityGB ?? 0) - gb) <= gb * 0.05);
-      let targetGB = budgetCents >= 1000000 ? 2000 : 1000;
+      // ¥3,500 以下 512GB，¥10,000 以上 2TB，其余 1TB；目标容量没货时就近退一档
+      let targetGB = budgetCents >= 1000000 ? 2000 : budgetCents < 350000 ? 512 : 1000;
       let pool = near(targetGB);
       if (!pool.length && targetGB === 2000) { targetGB = 1000; pool = near(1000); }
+      if (!pool.length && targetGB === 512) { targetGB = 500; pool = near(500); }
+      if (!pool.length && targetGB <= 512) { targetGB = 1000; pool = near(1000); }
       const fast = pool.filter(i => /PCIE\s*[45]/i.test(i.specs.interface ?? '') && (i.specs.readMBs ?? 0) >= 5000);
       const item = cheapestOf(fast.length ? fast : pool);
       if (item) set('SSD', item, `${targetGB >= 1000 ? `${targetGB / 1000}TB` : `${targetGB}GB`}${fast.length ? ' PCIe 4.0+、读 ≥5000MB/s' : ''}，满足条件里最便宜`);
@@ -277,7 +326,9 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
     }
   }
 
-  for (const slot of open) if (!picks[slot]) notes.push(`${slot} 没有找到同时满足兼容性和价格数据的型号，请手动选择。`);
+  if (stockCoolerNote) notes.push(stockCoolerNote);
+  if (igpu) notes.push('核显方案：不配独立显卡，用 CPU 自带核显，适合办公、网课、轻度网游；之后想玩大型游戏可以再加显卡。');
+  for (const slot of open) if (!picks[slot] && !(slot === 'COOLER' && stockCoolerNote)) notes.push(`${slot} 没有找到同时满足兼容性和价格数据的型号，请手动选择。`);
   if (total() > budgetCents) notes.push(`估算总价 ${yuan(total())} 超出预算 ${yuan(total() - budgetCents)}，可提高预算或手动降低某项。`);
   const usedGaming = gpuGroups.some(g => g.gaming != null);
   notes.push(`价格为参考价估算，不是报价。CPU 按${picks.CPU?.item.performance?.gaming ? '游戏指数' : ' Blender 多核渲染分'}挑选；显卡${usedGaming ? '按 2K 游戏指数' : '按估算价'}判断档次。`);
@@ -286,7 +337,38 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
     budgetCents,
     totalCents: total(),
     lockedCents,
+    igpu,
+    stockCooler: !!stockCoolerNote,
     picks: SLOTS.filter(s => picks[s]).map(slot => ({ slot, reason: picks[slot].reason, item: picks[slot].item })),
     notes: [...new Set(notes)],
   };
+}
+
+/**
+ * 一次出三套：省钱版 / 推荐版 / 进阶版。
+ * ¥3,500 以下或“办公”用途时，省钱版为核显方案；办公用途三套都不配独显。
+ */
+export function recommendPlans(items, { budgetCents, scenarios = [] }) {
+  const office = scenarios.includes('office');
+  const lowBudget = budgetCents < 350000;
+  const variants = [
+    { id: 'save', label: '省钱版', budget: Math.round(budgetCents * 0.8 / 10000) * 10000, igpu: office || lowBudget },
+    { id: 'balanced', label: '推荐版', budget: budgetCents, igpu: office },
+    { id: 'plus', label: '进阶版', budget: Math.round(budgetCents * 1.2 / 10000) * 10000, igpu: office },
+  ];
+  const plans = variants.map(v => {
+    let r = recommend(items, { budgetCents: v.budget, scenarios, igpu: v.igpu });
+    // 预算放不下独显（超出 10% 以上）时改用核显方案
+    if (!v.igpu && r.totalCents > v.budget * 1.1) {
+      const ig = recommend(items, { budgetCents: v.budget, scenarios, igpu: true });
+      if (ig.totalCents < r.totalCents) {
+        ig.notes.unshift(`这个预算放不下独立显卡（最低约 ${yuan(r.totalCents)}），改用核显方案。`);
+        r = ig;
+      }
+    }
+    return { id: v.id, label: v.label, targetCents: v.budget, ...r };
+  });
+  // 进阶版与推荐版配置一样时（预算再加也选不出更好的），不重复展示
+  const sameAs = (a, b) => a.picks.map(p => p.item.id).join() === b.picks.map(p => p.item.id).join();
+  return plans.filter((p, i) => i === 0 || !sameAs(p, plans[i - 1]));
 }

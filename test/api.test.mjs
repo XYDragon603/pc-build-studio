@@ -221,3 +221,9 @@ test('价格走势：读取参考价历史，给出最近一次变价与最低�
   assert.deepEqual(data.priceTrend, { previousCents: 379900, changedAt: '2026-11-24T00:00:00.000Z', lowestCents: 379900,
     since: '2026-11-17T00:00:00.000Z', points: 3 });
 });
+
+test('本地商品图：只提供 data/images 下合法文件名，非法路径 404', async t => {
+  const request = await listen(t);
+  assert.equal((await request('/images/not-exist.jpg')).status, 404);
+  assert.equal((await request('/images/..%2Fcatalog.json')).status, 404);
+});

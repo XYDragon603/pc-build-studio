@@ -41,6 +41,11 @@ export function loadPerformance(directory, dataFile = new URL('../data/perf-gami
       b = key && blenderGpu.get(key);
       // 游戏表可按显存区分（如 RTX 5060 TI 16GB），优先精确匹配
       g = key && (gamingGpu.get(`${key} ${item.specs?.capacityGB}GB`) ?? gamingGpu.get(key));
+      // 国内特供 D 版（如 RTX 5090 D、4090 D）游戏性能与标准版基本一致，沿用标准版并注明
+      if (!g && key && / D$/.test(key)) {
+        const base = gamingGpu.get(key.replace(/ D$/, ''));
+        if (base) g = { ...base, label: `按 ${key.replace(/ D$/, '')} 计` };
+      }
     }
     if (!b && !g) return item;
     return {

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { invalid, ApiError } from './api-error.mjs';
 import { slotTypes } from './builds.mjs';
 import { loadPerformance } from './performance.mjs';
+import { cpuKey, gpuKey } from './perfkeys.mjs';
 
 const verified = JSON.parse(readFileSync(new URL('../data/catalog.json', import.meta.url), 'utf8'));
 const categoryIds = new Set(slotTypes.map(({ id }) => id));
@@ -57,7 +58,10 @@ function addZol(items, zolItems) {
   const enrich = new Map();
   const standalone = [];
   for (const zol of zolItems) {
-    const match = zol.mpn && zol.manufacturer ? index.get(partKey(zol, zol.mpn)) : null;
+    const candidate = zol.mpn && zol.manufacturer ? index.get(partKey(zol, zol.mpn)) : null;
+    // 料号相同但芯片 / 型号不同（ZOL 料号填错）时不合并
+    const chipOf = item => (item.category === 'GPU' ? gpuKey(item.specs?.chipset ?? item.name) : item.category === 'CPU' ? cpuKey(item.name) : null);
+    const match = candidate && (!chipOf(candidate) || !chipOf(zol) || chipOf(candidate) === chipOf(zol)) ? candidate : null;
     if (match && !enrich.has(match.id)) enrich.set(match.id, zol);
     else standalone.push(zol);
   }
@@ -121,6 +125,33 @@ function addTrends(items, history) {
   });
 }
 
+/**
+ * 补充商品图：data/part-images.json 为 { 目录 ID: 图片 }。
+ * 值为 https 网址，或 data/images/ 下的相对路径（经 /api/v1/images/ 提供）。只补没有图的条目。
+ */
+function readPartImages(file = new URL('../data/part-images.json', import.meta.url)) {
+  let map = {};
+  try { map = JSON.parse(readFileSync(file, 'utf8')); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const out = new Map();
+  for (const [id, value] of Object.entries(map ?? {})) {
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const v = value.trim();
+    if (/^https:\/\//i.test(v)) out.set(id, v);
+    else if (/^images\/[\w.\-]+\.(jpe?g|png|webp|gif)$/i.test(v)) out.set(id, `/api/v1/${v}`);
+  }
+  return out;
+}
+
+function addImages(items, images) {
+  if (!images.size) return items;
+  return items.map(item => {
+    if (item.imageUrl) return item;
+    const url = images.get(item.id) ?? (item.zolId ? images.get(item.zolId) : undefined);
+    return url ? { ...item, imageUrl: url, imageSourceUrl: item.imageSourceUrl ?? null } : item;
+  });
+}
+
 const median = values => {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -140,10 +171,13 @@ function addEstimates(items) {
     if (key && item.referencePriceCents) groups.set(key, [...(groups.get(key) ?? []), item.referencePriceCents]);
   }
   return items.map(item => {
+    const samples = groups.get(chipKey(item)) ?? [];
     if (item.referencePriceCents) {
+      // 显卡参考价比同芯片中位价低 40% 以上，多半是数据错误，不作估算价
+      const chipMedian = samples.length >= 3 ? median(samples) : null;
+      if (chipMedian && item.referencePriceCents < chipMedian * 0.6) return item;
       return { ...item, estimatedPriceCents: item.referencePriceCents, estimateBasis: 'reference', estimateSamples: 1 };
     }
-    const samples = groups.get(chipKey(item)) ?? [];
     if (samples.length >= 3) {
       return { ...item, estimatedPriceCents: median(samples), estimateBasis: 'chip-median', estimateSamples: samples.length };
     }
@@ -164,8 +198,8 @@ export function createCatalog(directory = '.runtime') {
   const imported = readImported(directory);
   const zol = readImported(directory, 'zol-catalog.json');
   const performance = loadPerformance(directory);
-  const items = addTrends(addEstimates(addZol(mergeCatalog(imported.items), zol.items)), readPriceHistory(directory))
-    .map(performance.attach);
+  const items = addImages(addTrends(addEstimates(addZol(mergeCatalog(imported.items), zol.items)), readPriceHistory(directory))
+    .map(performance.attach), readPartImages());
   const attributions = [imported.attribution, zol.attribution].filter(Boolean);
   const byId = new Map(items.map(item => [item.id, item]));
   const searchIndex = items.map(item => ({ item,
@@ -186,10 +220,29 @@ export function createCatalog(directory = '.runtime') {
       const offset = pagination(params.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER, 'offset');
       const tokens = query.split(/\s+/u).map(normalize).filter(Boolean);
       const compactQuery = normalize(query);
-      const matches = searchIndex.filter(({ item, terms }) =>
+      const hasPrice = params.get('hasPrice') === '1';
+      const hasImage = params.get('hasImage') === '1';
+      const sort = params.get('sort') ?? '';
+      if (sort && !['price', '-price', 'perf', 'value'].includes(sort)) throw invalid('sort 只能是 price、-price、perf 或 value');
+      let matches = searchIndex.filter(({ item, terms }) =>
         (!category || item.category === category)
+        && (!hasPrice || item.estimatedPriceCents > 0)
+        && (!hasImage || !!item.imageUrl)
         && (!compactQuery || terms.some(term => term.includes(compactQuery))
           || tokens.every(token => terms.some(term => term.includes(token)))));
+      if (sort) {
+        // 性能 / 性价比：没有游戏指数的排在后面
+        // 只按游戏指数排：Blender 渲染分与游戏指数口径不同，显卡还偏向 NVIDIA
+        const perf = item => item.performance?.gaming?.index ?? null;
+        const priceOf = item => item.estimatedPriceCents ?? Infinity;
+        const key = {
+          price: item => priceOf(item),
+          '-price': item => -(item.estimatedPriceCents ?? -Infinity),
+          perf: item => -(perf(item) ?? -Infinity),
+          value: item => (perf(item) && item.estimatedPriceCents ? -perf(item) / item.estimatedPriceCents : Infinity),
+        }[sort];
+        matches = [...matches].sort((a, b) => key(a.item) - key(b.item));
+      }
       return { items: matches.slice(offset, offset + limit).map(entry => brief(entry.item)),
         total: matches.length, limit, offset, attribution: imported.attribution, attributions, performanceSources: performance.meta };
     },

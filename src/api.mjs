@@ -7,7 +7,9 @@ import { BraveSearch } from './search.mjs';
 import { LocalStore } from './store.mjs';
 import { createCatalog } from './catalog.mjs';
 import { JdUnion } from './jdunion.mjs';
-import { recommend, SLOTS as RECOMMEND_SLOTS } from './recommend.mjs';
+import { recommend, recommendPlans, SLOTS as RECOMMEND_SLOTS } from './recommend.mjs';
+import { readFile } from 'node:fs/promises';
+import { extname, join, normalize, sep } from 'node:path';
 
 const localHosts = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const bodyLimit = 64 * 1024;
@@ -57,7 +59,23 @@ function quoteForClient(result) {
     status, autoEligible, reasonCodes, reasons, method, url: merchantUrl(url) };
 }
 
-export function createApiServer({ directory, catalogDirectory = directory,
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json; charset=utf-8', '.woff2': 'font/woff2' };
+
+/** 提供前端构建产物（web/dist）；找不到的路径回到 index.html。只允许读 staticDir 之内的文件 */
+async function serveStatic(staticDir, pathname, response) {
+  const safe = normalize(decodeURIComponent(pathname)).replace(/^([/\\])+/, '');
+  let file = join(staticDir, safe || 'index.html');
+  if (!file.startsWith(normalize(staticDir) + sep) && file !== normalize(staticDir)) file = join(staticDir, 'index.html');
+  let body;
+  try { body = await readFile(file); }
+  catch { file = join(staticDir, 'index.html'); body = await readFile(file); }
+  response.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream', 'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': file.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable' });
+  response.end(body);
+}
+
+export function createApiServer({ directory, catalogDirectory = directory, staticDir = null,
   provider = new BraveSearch(), inspect, jdUnion = new JdUnion({ directory }), onError = console.error } = {}) {
   const builds = new BuildRepository(new LocalStore(directory));
   const catalog = createCatalog(catalogDirectory);
@@ -109,6 +127,28 @@ export function createApiServer({ directory, catalogDirectory = directory,
         response.writeHead(204).end();
         return;
       }
+      if (pathname === '/api/v1/plans' && method === 'POST') {
+        const { budgetCents, scenarios = [] } = await readJson(request);
+        if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
+        if (!Array.isArray(scenarios) || scenarios.length > 8 || !scenarios.every(s => typeof s === 'string' && s.length <= 32)) throw invalid('scenarios 格式无效');
+        return json(response, 200, { plans: recommendPlans(catalog.all(), { budgetCents, scenarios }) });
+      }
+      // data/images/ 下的本地商品图（data/part-images.json 引用）
+      const imageMatch = /^\/api\/v1\/images\/([\w.-]+\.(?:jpe?g|png|webp|gif))$/i.exec(pathname);
+      if (imageMatch && method === 'GET') {
+        const file = new URL(`../data/images/${imageMatch[1]}`, import.meta.url);
+        let body;
+        try { body = await readFile(file); } catch { throw new ApiError(404, 'IMAGE_NOT_FOUND', '没有这张图片'); }
+        const ext = extname(imageMatch[1]).toLowerCase();
+        response.writeHead(200, { 'Content-Type': { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' }[ext],
+          'Cache-Control': 'public, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
+        response.end(body);
+        return;
+      }
+      if (staticDir && method === 'GET' && !pathname.startsWith('/api/')) {
+        await serveStatic(staticDir, pathname, response);
+        return;
+      }
       if (pathname === '/api/v1/recommend' && method === 'POST') {
         const { budgetCents, scenarios = [], locked = {} } = await readJson(request);
         if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
@@ -144,7 +184,7 @@ export function createApiServer({ directory, catalogDirectory = directory,
       }
 
       const allowed = singleBuild ? 'GET, PUT, DELETE' : singleProduct ? 'GET' : {
-        '/api/v1/builds': 'GET, POST', '/api/v1/quotes/search': 'POST', '/api/v1/quotes/jd': 'POST', '/api/v1/recommend': 'POST',
+        '/api/v1/builds': 'GET, POST', '/api/v1/quotes/search': 'POST', '/api/v1/quotes/jd': 'POST', '/api/v1/recommend': 'POST', '/api/v1/plans': 'POST',
         '/api/v1/catalog': 'GET',
         '/api/v1/health': 'GET', '/api/v1/slot-types': 'GET', '/api/v1/templates/demo': 'GET',
       }[pathname];
