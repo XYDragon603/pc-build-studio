@@ -11,6 +11,7 @@ test('型号键：Blender 原始名与中文商品名对得上', () => {
   assert.equal(cpuKey('AMD Ryzen 7 9700X 8-Core Processor'), cpuKey('AMD Ryzen 7 9700X'));
   assert.equal(cpuKey('Intel(R) Core(TM) i5-14600KF'), cpuKey('Intel 酷睿 i5 14600KF'));
   assert.equal(cpuKey('Intel(R) Core(TM) Ultra 7 265K'), cpuKey('Intel 酷睿 Ultra 7 265K'));
+  assert.equal(cpuKey('AMD 锐龙 9 9950X3D2'), 'RYZEN 9950X3D2');
   assert.notEqual(cpuKey('AMD Ryzen 5 5600'), cpuKey('AMD Ryzen 5 5600X'));
   assert.equal(gpuKey('NVIDIA GeForce RTX 5060 Ti'), gpuKey('GeForce RTX 5060 Ti'));
   assert.equal(gpuKey('AMD Radeon RX 9070 XT'), 'RX 9070 XT');

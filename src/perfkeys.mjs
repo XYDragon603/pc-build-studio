@@ -3,7 +3,8 @@
 /** CPU 型号键：RYZEN 9700X / RYZEN 5600 / I5-14600KF / ULTRA7-265K；识别不了返回 null */
 export function cpuKey(name) {
   const t = String(name ?? '').normalize('NFKC').toUpperCase().replace(/\(R\)|\(TM\)|®|™/g, ' ').replace(/\s+/g, ' ');
-  let m = t.match(/RYZEN\s*(?:THREADRIPPER\s*)?(?:[3579]\s*)?(?:PRO\s*)?(\d{4}[A-Z0-9]*)/);
+  // 国内名称常写“锐龙 9 9950X3D2”
+  let m = t.match(/(?:RYZEN|锐龙)\s*(?:THREADRIPPER\s*)?(?:[3579]\s*)?(?:PRO\s*)?(\d{4}[A-Z0-9]*)/);
   if (m) return `RYZEN ${m[1]}`;
   m = t.match(/ULTRA\s*([3579])\s*(?:PROCESSOR\s*)?(\d{3}[A-Z]*)/);
   if (m) return `ULTRA${m[1]}-${m[2]}`;
