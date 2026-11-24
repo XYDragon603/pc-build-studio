@@ -43,9 +43,17 @@ const saved = await response.json();
 
 `POST`、`GET /builds/:id` 和 `PUT` 返回的配置包括 `id`、`version`、`name`、`budgetCents`、`slots`、`totals`、`compatibility`、`createdAt` 和 `updatedAt`。模板没有持久化 ID 或版本。
 
+## 草稿与方案备份
+
+- `GET /api/v1/draft` 返回 `{ draft: null }` 或 `{ draft: { build, serverId?, version? } }`。桌面和网页使用同一数据目录时共享最近编辑的草稿。
+- `PUT /api/v1/draft` 接收 `{ build, serverId?, version? }` 并返回 204。草稿写入 `draft.json`，与正式保存的方案独立。若附带已保存方案的 ID，需要同时提供该版本号。
+- `GET /api/v1/builds/backup` 导出 `{ format: 1, builds: [...] }`。向同一路径 `POST` 文件内容可恢复方案，返回 `{ restored, skipped }`。已有 ID 会跳过。
+
 ## 商品目录
 
 `GET /catalog?category=GPU&q=RTX%205060%20Ti%2016GB` 返回 `{ items, total, limit, offset }`。筛选参数可省略。默认每页 24 项，最多 100 项。商品图片直接使用 `imageUrl`，点详情用 `sourceUrl`。图片加载失败时显示占位图。
+
+`market=cn|global|all` 按来源筛选，默认为 `all`。条目的 `market` 为 `cn`（ZOL 条目、合并了 ZOL 数据的条目或内置官网样本）或 `global`（仅有 BuildCores 数据）。传入其他值返回 400。分组依据数据来源，库存仍需另外核实。
 
 每条记录包含稳定的 `id`、`category`、`name`、`manufacturer`、厂商料号或型号 `mpn`、一行 `summary`、`aliases` 和 `specs`。没有料号或核实图片时，`mpn` 或 `imageUrl` 为 `null`。图片和规格来自不同厂商页面时，`imageSourceUrl` 单独记录图片出处。8GB 和 16GB 这样的变体使用不同料号与记录。其中部分料号对应海外版本，目录不代表当地库存。
 
@@ -63,6 +71,8 @@ npm run catalog:import
 ```
 
 更新已有检出时使用 `git -C .runtime/buildcores-open-db pull --ff-only` 后重新导入。导入只取八类硬件的字段，并在存储类过滤非 SSD 记录。原仓库和快照都在 Git 忽略的 `.runtime` 目录。
+
+目录支持在分页前按当前配置筛选。传入类目及 JSON 格式的 `fit` 参数，例如 `category=MOTHERBOARD&fit={"socket":"AM5","memoryType":"DDR5"}`。规格匹配返回 `compatibility: "pass"`，任一已知条件冲突时默认隐藏，传 `showConflicts=1` 可显示为 `"conflict"`。缺少用于判断的规格返回 `"unknown"`。按返回的 `total` 和 `offset` 翻页。
 
 ## 槽位与预算
 
@@ -120,10 +130,23 @@ npm run catalog:import
 
 ## 估算价
 
-目录条目可带 `estimatedPriceCents`、`estimateBasis` 与 `estimateSamples`：有 ZOL 参考价时 `estimateBasis` 为 `reference`；显卡缺参考价时，用同芯片、同显存条目参考价的中位数，至少 3 个样本，`estimateBasis` 为 `chip-median`。`priceObservedAt` 为参考价的观察时间。估算价不是报价。`npm run catalog:prices` 重抓已抓过的 ZOL 列表页刷新参考价，并追加 `.runtime/zol-price-history.jsonl`，重启 API 后生效。
+目录条目可带 `estimatedPriceCents`、`estimateBasis` 与 `estimateSamples`。
+
+| `estimateBasis` | 依据 |
+|---|---|
+| `reference` | 条目自身的 ZOL 参考价 |
+| `chip-median` | 同芯片、同显存的显卡参考价中位数 |
+| `model` | CPU 型号键完全相同。一个样本直接沿用，至少三个有效样本时用中位价 |
+| `spec-median` | 内存、电源或 SSD 的同规格中位价 |
+
+补价只使用已有价格作为样本。内存比较代际、容量与条数，电源比较取整到 50 W 的额定功率与能效档，SSD 比较标称容量与 PCIe 代数或 SATA。未知接口和未知能效各自分组。新增中位价剔除低于原组中位数 60% 的样本，保留至少三个样本，再把结果四舍五入到 10 元。
+
+`priceObservedAt` 为参考价的观察时间。估算价用于参考。`npm run catalog:prices` 重抓已抓过的 ZOL 列表页刷新参考价，并追加 `.runtime/zol-price-history.jsonl`，重启 API 后生效。
 
 ## 按预算自动配
 
 `POST /recommend` 请求体 `{ "budgetCents": 800000, "scenarios": ["2k", "quiet"], "locked": { "CPU": { "priceCents": 145000, "specs": { "socket": "AM5" } } } }`。`locked` 的键为标准槽位 ID，`specs` 使用与配件相同的兼容性字段。返回 `{ budgetCents, totalCents, lockedCents, picks: [{ slot, reason, item }], notes }`，`item` 为目录条目（含 `estimatedPriceCents`）。只使用有估算价、且兼容性所需规格齐全的条目；结果为估算，不是报价。
+
+`/recommend` 和 `/plans` 的自动选件都只使用 `market: "cn"` 的条目。
 
 目录条目在有价格历史时带 `priceTrend: { previousCents, changedAt, lowestCents, since, points }`。

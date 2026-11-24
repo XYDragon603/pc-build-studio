@@ -136,7 +136,7 @@ export function normalizeBuild(input) {
 const BOARD_RANK = { 'MINI-ITX': 1, 'MICRO ATX': 2, ATX: 3, EATX: 4 };
 
 /** 主板板型不大于机箱支持的最大板型即可安装；无法识别的板型为 unknown */
-function boardFit(board, maxBoard) {
+export function boardFit(board, maxBoard) {
   const size = BOARD_RANK[board];
   const limit = BOARD_RANK[maxBoard];
   if (!size || !limit) return { status: 'unknown', formFactor: board ?? null, maxFormFactor: maxBoard ?? null };
@@ -149,7 +149,7 @@ function gpuPowerConnector(connector, native16Pin) {
   return { status: native16Pin ? 'pass' : 'warning', required: connector };
 }
 
-function clearance(sizeMm, limitMm) {
+export function clearance(sizeMm, limitMm) {
   if (!sizeMm || !limitMm) return { status: 'unknown', sizeMm: sizeMm ?? null, limitMm: limitMm ?? null };
   return { status: sizeMm <= limitMm ? 'pass' : 'conflict', sizeMm, limitMm };
 }
@@ -203,6 +203,26 @@ function assertVersion(build, version) {
   if (build.version !== version) throw new ApiError(409, 'VERSION_CONFLICT', '配置已更新，请重新载入后保存');
 }
 
+function buildId(value) {
+  if (typeof value !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value)) {
+    throw invalid('方案 ID 无效');
+  }
+  return value;
+}
+
+function timestamp(value) {
+  if (typeof value !== 'string' || value.length > 32 || !Number.isFinite(Date.parse(value))) {
+    throw invalid('方案时间无效');
+  }
+  return new Date(value).toISOString();
+}
+
+export function normalizeDraft(input) {
+  const build = normalizeBuild(input.build);
+  if (input.serverId == null && input.version == null) return { build };
+  return { build, serverId: buildId(input.serverId), version: integer(input.version, 'version', 1, Number.MAX_SAFE_INTEGER) };
+}
+
 export class BuildRepository {
   constructor(store) {
     this.store = store;
@@ -214,12 +234,12 @@ export class BuildRepository {
   }
 
   mutate(change) {
-    const operation = this.pending.then(async () => {
+    const operation = this.pending.then(() => this.store.withLock('builds.lock', async () => {
       const builds = await this.read();
       const result = change(builds);
       await this.store.write('builds.json', builds);
       return result;
-    });
+    }));
     this.pending = operation.catch(() => {});
     return operation;
   }
@@ -234,6 +254,34 @@ export class BuildRepository {
 
   async get(id) {
     return calculateBuild(this.find(await this.read(), id));
+  }
+
+  async backup() {
+    return { format: 1, builds: Object.values(await this.read()) };
+  }
+
+  restore(input) {
+    if (input.format !== 1 || !Array.isArray(input.builds) || input.builds.length > 200) {
+      throw invalid('方案备份文件格式无效');
+    }
+    const incoming = new Map();
+    for (const entry of input.builds) {
+      object(entry, '方案');
+      const id = buildId(entry.id);
+      if (incoming.has(id)) throw invalid('备份中有重复的方案 ID');
+      const version = integer(entry.version, 'version', 1, Number.MAX_SAFE_INTEGER);
+      const createdAt = timestamp(entry.createdAt);
+      const updatedAt = timestamp(entry.updatedAt);
+      incoming.set(id, { ...normalizeBuild(entry), id, version, createdAt, updatedAt });
+    }
+    return this.mutate(builds => {
+      const additions = [...incoming].filter(([id]) => !Object.hasOwn(builds, id));
+      if (Object.keys(builds).length + additions.length > 200) {
+        throw new ApiError(409, 'BUILD_LIMIT', '恢复后会超过本机 200 份方案的上限');
+      }
+      for (const [id, entry] of additions) builds[id] = entry;
+      return { restored: additions.length, skipped: incoming.size - additions.length };
+    });
   }
 
   find(builds, id) {

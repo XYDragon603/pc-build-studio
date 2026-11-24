@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { ApiError, invalid } from './api-error.mjs';
-import { BuildRepository, buildTemplate, calculateBuild, slotTypes } from './builds.mjs';
+import { BuildRepository, buildTemplate, calculateBuild, normalizeDraft, slotTypes } from './builds.mjs';
 import { merchantUrl, parseTarget } from './normalization.mjs';
 import { replayQuotes, searchQuotes } from './quotes.mjs';
 import { BraveSearch } from './search.mjs';
@@ -31,7 +31,7 @@ function json(response, status, data) {
   response.end(JSON.stringify(data));
 }
 
-async function readJson(request) {
+async function readJson(request, maxBytes = bodyLimit) {
   if (request.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
     throw new ApiError(415, 'UNSUPPORTED_MEDIA_TYPE', '请求必须使用 application/json');
   }
@@ -39,9 +39,9 @@ async function readJson(request) {
   let bytes = 0;
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     bytes += chunk.length;
-    if (bytes > bodyLimit) {
+    if (bytes > maxBytes) {
       request.resume();
-      throw new ApiError(413, 'BODY_TOO_LARGE', '请求体不能超过 64 KB');
+      throw new ApiError(413, 'BODY_TOO_LARGE', '请求体超过允许的大小');
     }
     chunks.push(chunk);
   }
@@ -77,7 +77,8 @@ async function serveStatic(staticDir, pathname, response) {
 
 export function createApiServer({ directory, catalogDirectory = directory, staticDir = null,
   provider = new BraveSearch(), inspect, jdUnion = new JdUnion({ directory }), onError = console.error } = {}) {
-  const builds = new BuildRepository(new LocalStore(directory));
+  const store = new LocalStore(directory);
+  const builds = new BuildRepository(store);
   const catalog = createCatalog(catalogDirectory);
   let liveRequests = 0;
 
@@ -113,6 +114,17 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
       if (pathname === '/api/v1/catalog' && method === 'GET') return json(response, 200, catalog.list(url.searchParams));
       if (singleProduct && method === 'GET') return json(response, 200, catalog.get(singleProduct[1]));
       if (pathname === '/api/v1/templates/demo' && method === 'GET') return json(response, 200, calculateBuild(buildTemplate('demo')));
+      if (pathname === '/api/v1/draft' && method === 'GET') return json(response, 200, { draft: await store.read('draft.json', null) });
+      if (pathname === '/api/v1/draft' && method === 'PUT') {
+        const draft = normalizeDraft(await readJson(request));
+        await store.withLock('draft.lock', () => store.write('draft.json', draft));
+        response.writeHead(204).end();
+        return;
+      }
+      if (pathname === '/api/v1/builds/backup' && method === 'GET') return json(response, 200, await builds.backup());
+      if (pathname === '/api/v1/builds/backup' && method === 'POST') {
+        return json(response, 200, await builds.restore(await readJson(request, 16 * 1024 ** 2)));
+      }
       if (pathname === '/api/v1/builds' && method === 'GET') return json(response, 200, { items: await builds.list() });
       if (pathname === '/api/v1/builds' && method === 'POST') {
         const build = await builds.create(await readJson(request));
@@ -131,7 +143,7 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         const { budgetCents, scenarios = [] } = await readJson(request);
         if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
         if (!Array.isArray(scenarios) || scenarios.length > 8 || !scenarios.every(s => typeof s === 'string' && s.length <= 32)) throw invalid('scenarios 格式无效');
-        return json(response, 200, { plans: recommendPlans(catalog.all(), { budgetCents, scenarios }) });
+        return json(response, 200, { plans: recommendPlans(catalog.all().filter(item => item.market === 'cn'), { budgetCents, scenarios }) });
       }
       // data/images/ 下的本地商品图（data/part-images.json 引用）
       const imageMatch = /^\/api\/v1\/images\/([\w.-]+\.(?:jpe?g|png|webp|gif))$/i.exec(pathname);
@@ -160,7 +172,7 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
           if (!part || typeof part !== 'object' || (part.priceCents != null && !Number.isSafeInteger(part.priceCents))) throw invalid('locked 配件格式无效');
           lockedParts[slot] = { priceCents: part.priceCents ?? 0, specs: part.specs && typeof part.specs === 'object' ? part.specs : {} };
         }
-        return json(response, 200, recommend(catalog.all(), { budgetCents, scenarios, locked: lockedParts }));
+        return json(response, 200, recommend(catalog.all().filter(item => item.market === 'cn'), { budgetCents, scenarios, locked: lockedParts }));
       }
       if (pathname === '/api/v1/quotes/jd' && method === 'POST') {
         const { skuIds } = await readJson(request);
@@ -185,6 +197,7 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
 
       const allowed = singleBuild ? 'GET, PUT, DELETE' : singleProduct ? 'GET' : {
         '/api/v1/builds': 'GET, POST', '/api/v1/quotes/search': 'POST', '/api/v1/quotes/jd': 'POST', '/api/v1/recommend': 'POST', '/api/v1/plans': 'POST',
+        '/api/v1/draft': 'GET, PUT', '/api/v1/builds/backup': 'GET, POST',
         '/api/v1/catalog': 'GET',
         '/api/v1/health': 'GET', '/api/v1/slot-types': 'GET', '/api/v1/templates/demo': 'GET',
       }[pathname];

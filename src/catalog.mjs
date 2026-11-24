@@ -4,8 +4,10 @@ import { invalid, ApiError } from './api-error.mjs';
 import { slotTypes } from './builds.mjs';
 import { loadPerformance } from './performance.mjs';
 import { cpuKey, gpuKey } from './perfkeys.mjs';
+import { catalogFitStatus, parseCatalogFit } from './catalog-fit.mjs';
 
 const verified = JSON.parse(readFileSync(new URL('../data/catalog.json', import.meta.url), 'utf8'));
+const verifiedIds = new Set(verified.map(item => item.id));
 const categoryIds = new Set(slotTypes.map(({ id }) => id));
 const normalize = value => (value ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 
@@ -162,7 +164,7 @@ const median = values => {
  * 估算价：有 ZOL 参考价就用参考价；显卡没有时，用同芯片、同显存的参考价中位数（至少 3 个样本）。
  * 估算价只作参考，不是报价。
  */
-function addEstimates(items) {
+function addReferenceAndChipEstimates(items) {
   const chipKey = item => item.category === 'GPU' && item.specs.chipset && item.specs.capacityGB
     ? `${normalize(String(item.specs.chipset).replace(/^(geforce|radeon)\s*/i, ''))}:${item.specs.capacityGB}` : null;
   const groups = new Map();
@@ -171,6 +173,7 @@ function addEstimates(items) {
     if (key && item.referencePriceCents) groups.set(key, [...(groups.get(key) ?? []), item.referencePriceCents]);
   }
   return items.map(item => {
+    if (item.estimatedPriceCents > 0) return item;
     const samples = groups.get(chipKey(item)) ?? [];
     if (item.referencePriceCents) {
       // 显卡参考价比同芯片中位价低 40% 以上，多半是数据错误，不作估算价
@@ -182,6 +185,75 @@ function addEstimates(items) {
       return { ...item, estimatedPriceCents: median(samples), estimateBasis: 'chip-median', estimateSamples: samples.length };
     }
     return item;
+  });
+}
+
+function efficiencyTier(value) {
+  const tier = normalize(value);
+  if (/titanium|钛金/.test(tier)) return 'titanium';
+  if (/platinum|白金|铂金/.test(tier)) return 'platinum';
+  if (/gold|金牌/.test(tier)) return 'gold';
+  if (/silver|银牌/.test(tier)) return 'silver';
+  if (/bronze|铜牌/.test(tier)) return 'bronze';
+  if (/white|白牌|standard/.test(tier) || tier === '80plus' || tier === '80') return 'white';
+  return 'unknown';
+}
+
+function ssdKey({ capacityGB, interface: connection }) {
+  // 同一标称容量可能以 1000/1024 GB（或 500/512 GB）记录。
+  const tier = [500, 1000, 2000, 4000].find(gb => Math.abs(capacityGB - gb) <= gb * 0.05);
+  if (!tier) return null;
+  const bus = (connection ?? '').normalize('NFKC');
+  const gen = bus.match(/\bPCI[\s-]*E(?:XPRESS)?\s*(?:GEN\s*)?([345])(?:\.0)?(?![\d.])/i)?.[1];
+  return `${tier}:${/\bSATA/i.test(bus) ? 'sata' : gen ? 'pcie' + gen : 'unknown'}`;
+}
+
+function estimateGroup(item) {
+  const specs = item.specs ?? {};
+  switch (item.category) {
+    case 'CPU': return cpuKey(item.name);
+    case 'RAM': return specs.memoryType && specs.capacityGB > 0 && specs.modules > 0
+      ? `${normalize(specs.memoryType)}:${specs.capacityGB}:${specs.modules}` : null;
+    case 'PSU': return specs.ratedWatts > 0
+      ? `${Math.round(specs.ratedWatts / 50) * 50}:${efficiencyTier(specs.efficiency)}` : null;
+    case 'SSD': return ssdKey(specs);
+    default: return null;
+  }
+}
+
+function addEstimates(items) {
+  const base = addReferenceAndChipEstimates(items);
+  const groups = new Map();
+  const keys = base.map(item => {
+    const group = estimateGroup(item);
+    if (group === null) return null;
+    const key = item.category + ':' + group;
+    if (item.estimatedPriceCents > 0) {
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item.estimatedPriceCents);
+    }
+    return key;
+  });
+  const estimates = new Map();
+  for (const [key, samples] of groups) {
+    const cpu = key.startsWith('CPU:');
+    const estimateBasis = cpu ? 'model' : 'spec-median';
+    if (cpu && samples.length === 1) {
+      estimates.set(key, { estimatedPriceCents: samples[0], estimateBasis, estimateSamples: 1 });
+    } else if (samples.length >= 3) {
+      const threshold = median(samples) * 0.6;
+      const usable = samples.filter(price => price >= threshold);
+      if (usable.length < 3) continue;
+      const estimatedPriceCents = Math.round(median(usable) / 1000) * 1000;
+      if (estimatedPriceCents > 0) {
+        estimates.set(key, { estimatedPriceCents, estimateBasis, estimateSamples: usable.length });
+      }
+    }
+  }
+  return base.map((item, index) => {
+    if (item.estimatedPriceCents > 0) return item;
+    const estimate = estimates.get(keys[index]);
+    return estimate ? { ...item, ...estimate } : item;
   });
 }
 
@@ -199,7 +271,10 @@ export function createCatalog(directory = '.runtime') {
   const zol = readImported(directory, 'zol-catalog.json');
   const performance = loadPerformance(directory);
   const items = addImages(addTrends(addEstimates(addZol(mergeCatalog(imported.items), zol.items)), readPriceHistory(directory))
-    .map(performance.attach), readPartImages());
+    .map(item => ({
+      ...performance.attach(item),
+      market: item.dataSource === 'zol' || item.zolId || verifiedIds.has(item.id) ? 'cn' : 'global',
+    })), readPartImages());
   const attributions = [imported.attribution, zol.attribution].filter(Boolean);
   const byId = new Map(items.map(item => [item.id, item]));
   const searchIndex = items.map(item => ({ item,
@@ -224,12 +299,21 @@ export function createCatalog(directory = '.runtime') {
       const hasImage = params.get('hasImage') === '1';
       const sort = params.get('sort') ?? '';
       if (sort && !['price', '-price', 'perf', 'value'].includes(sort)) throw invalid('sort 只能是 price、-price、perf 或 value');
+      const market = params.get('market') ?? 'all';
+      if (!['cn', 'global', 'all'].includes(market)) throw invalid('market 只能是 cn、global 或 all');
+      const fit = parseCatalogFit(params.get('fit'), category);
+      const showConflicts = params.get('showConflicts') === '1';
       let matches = searchIndex.filter(({ item, terms }) =>
         (!category || item.category === category)
+        && (market === 'all' || item.market === market)
         && (!hasPrice || item.estimatedPriceCents > 0)
         && (!hasImage || !!item.imageUrl)
         && (!compactQuery || terms.some(term => term.includes(compactQuery))
           || tokens.every(token => terms.some(term => term.includes(token)))));
+      if (fit) {
+        matches = matches.map(entry => ({ ...entry, compatibility: catalogFitStatus(entry.item.specs, fit) }));
+        if (!showConflicts) matches = matches.filter(entry => entry.compatibility !== 'conflict');
+      }
       if (sort) {
         // 性能 / 性价比：没有游戏指数的排在后面
         // 只按游戏指数排：Blender 渲染分与游戏指数口径不同，显卡还偏向 NVIDIA
@@ -243,7 +327,8 @@ export function createCatalog(directory = '.runtime') {
         }[sort];
         matches = [...matches].sort((a, b) => key(a.item) - key(b.item));
       }
-      return { items: matches.slice(offset, offset + limit).map(entry => brief(entry.item)),
+      return { items: matches.slice(offset, offset + limit).map(({ item, compatibility }) =>
+        compatibility ? { ...brief(item), compatibility } : brief(item)),
         total: matches.length, limit, offset, attribution: imported.attribution, attributions, performanceSources: performance.meta };
     },
     get(id) {

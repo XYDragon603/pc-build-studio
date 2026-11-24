@@ -63,11 +63,47 @@ test('配置 API 保存与重读整单，保护锁定槽位和并发编辑', asy
   assert.deepEqual((await anotherServer(path)).data, saved.data);
   assert.equal((await request('/builds')).data.items.length, 1);
   const update = { ...saved.data, budgetCents: 300000 };
-  const concurrent = await Promise.all([request(path, 'PUT', update), request(path, 'PUT', update)]);
+  const concurrent = await Promise.all([request(path, 'PUT', update), anotherServer(path, 'PUT', update)]);
   assert.deepEqual(concurrent.map(result => result.status).sort(), [200, 409]);
   assert.equal(concurrent.find(result => result.status === 200).data.totals.remainingCents, -94400);
   assert.equal((await request(path, 'DELETE', { version: 3 })).status, 204);
   assert.equal((await request(path)).status, 404);
+});
+
+test('草稿跨服务恢复，两份服务同时保存不会覆盖，备份恢复跳过现有方案', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'pc-draft-test-'));
+  const request = await listen(t, directory);
+  const another = await listen(t, directory);
+  t.after(async () => {
+    for (const name of await readdir(directory)) await unlink(join(directory, name));
+    await rmdir(directory);
+  });
+
+  assert.equal((await request('/draft')).data.draft, null);
+  const creations = await Promise.all([
+    request('/builds', 'POST', { name: '桌面' }),
+    another('/builds', 'POST', { name: '网页' }),
+  ]);
+  assert.deepEqual(creations.map(result => result.status), [201, 201]);
+  assert.equal((await request('/builds')).data.items.length, 2);
+  const [one, two] = creations.map(result => result.data);
+  const draft = { build: { ...one, name: '待保存的修改' }, serverId: one.id, version: one.version };
+  assert.equal((await request('/draft', 'PUT', draft)).status, 204);
+  const reopened = await listen(t, directory);
+  const restored = (await reopened('/draft')).data.draft;
+  assert.equal(restored.build.name, '待保存的修改');
+  assert.equal(restored.serverId, one.id);
+  assert.equal(restored.version, one.version);
+  assert.equal((await reopened('/builds/' + one.id)).data.name, '桌面');
+  assert.equal((await reopened('/draft', 'PUT', { build: draft.build, serverId: 'bad', version: 1 })).status, 400);
+
+  const backup = (await request('/builds/backup')).data;
+  assert.equal(backup.builds.length, 2);
+  assert.equal((await request('/builds/' + two.id, 'DELETE', { version: two.version })).status, 204);
+  assert.deepEqual((await reopened('/builds/backup', 'POST', backup)).data, { restored: 1, skipped: 1 });
+  assert.equal((await request('/builds/' + two.id)).data.name, '网页');
+  assert.equal((await reopened('/builds/backup', 'POST', { format: 1, builds: [{ ...one, slots: [] }] })).status, 400);
+  assert.equal((await request('/builds')).data.items.length, 2);
 });
 
 test('报价 API 回放真实记录，区分缺少密钥、输入无效和不允许的跨域来源', async t => {
@@ -106,6 +142,38 @@ test('商品目录按类目和型号变体筛选，图片与来源随具体料�
   assert.equal(page.data.items.length, 1);
   assert.equal((await request('/catalog?category=OTHER')).status, 400);
   assert.equal((await request('/catalog/nonexistent')).status, 404);
+});
+
+test('目录先过滤兼容性再分页，缺规格和无价格的型号仍可查询', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'pc-fit-test-'));
+  t.after(async () => {
+    for (const name of await readdir(directory)) await unlink(join(directory, name));
+    await rmdir(directory);
+  });
+  const records = [['conflict-a', 'AM4', 10], ['conflict-b', 'AM4', 20], ['pass-a', 'AM5', 30],
+    ['unknown', null, 40], ['pass-unpriced', 'AM5', null]].map(([id, socket, price]) => ({
+    id: 'zol-' + id, category: 'MOTHERBOARD', manufacturer: 'Test', mpn: id, name: id,
+    aliases: [], specs: socket ? { socket } : {}, referencePriceCents: price === null ? null : price * 100, dataSource: 'zol',
+  }));
+  await writeFile(join(directory, 'zol-catalog.json'), JSON.stringify({ items: records }));
+  const request = await listen(t, directory);
+  const params = new URLSearchParams({ category: 'MOTHERBOARD', market: 'cn', sort: 'price',
+    limit: '1', fit: JSON.stringify({ socket: 'AM5' }) });
+  const page = await request('/catalog?' + params);
+  assert.equal(page.status, 200);
+  assert.equal(page.data.items[0].id, 'zol-pass-a');
+  assert.equal(page.data.items[0].compatibility, 'pass');
+  params.set('offset', '1');
+  assert.equal((await request('/catalog?' + params)).data.items[0].compatibility, 'unknown');
+  params.set('showConflicts', '1');
+  assert.equal((await request('/catalog?' + params)).data.items[0].compatibility, 'conflict');
+  params.set('q', 'pass-unpriced');
+  params.set('offset', '0');
+  const unpriced = (await request('/catalog?' + params)).data.items[0];
+  assert.equal(unpriced.id, 'zol-pass-unpriced');
+  assert.equal(unpriced.estimatedPriceCents, undefined);
+  params.set('fit', JSON.stringify({ minPsuWatts: 500 }));
+  assert.equal((await request('/catalog?' + params)).status, 400);
 });
 
 test('导入目录保留数据来源，只给唯一匹配的料号关联已核实图片', async t => {
@@ -226,4 +294,109 @@ test('本地商品图：只提供 data/images 下合法文件名，非法路径 
   const request = await listen(t);
   assert.equal((await request('/images/not-exist.jpg')).status, 404);
   assert.equal((await request('/images/..%2Fcatalog.json')).status, 404);
+});
+
+async function estimateFixture(t, priced, unpriced) {
+  const directory = await mkdtemp(join(tmpdir(), 'pc-catalog-filters-'));
+  t.after(async () => {
+    for (const file of await readdir(directory)) await unlink(join(directory, file));
+    await rmdir(directory);
+  });
+  const common = { manufacturer: 'Test', mpn: null, partNumbers: [], aliases: [], summary: '',
+    imageUrl: null, sourceUrl: 'https://example.com/product' };
+  await Promise.all([
+    writeFile(join(directory, 'zol-catalog.json'), JSON.stringify({
+      items: priced.map(item => ({ ...common, ...item, dataSource: 'zol' })),
+    })),
+    writeFile(join(directory, 'buildcores-catalog.json'), JSON.stringify({
+      items: unpriced.map(item => ({ ...common, ...item, dataSource: 'buildcores' })),
+    })),
+  ]);
+  return listen(t, directory);
+}
+
+test('CPU 补价只用完全相同的型号键，未知型号和不同后缀不匹配', async t => {
+  const cpu = (id, name, referencePriceCents) => ({ id, name, referencePriceCents, category: 'CPU', specs: {} });
+  const request = await estimateFixture(t, [
+    cpu('zol-exact', 'Intel Core i5 14600K', 139900),
+    cpu('zol-unknown', 'Example Processor', 200000),
+    cpu('zol-unknown-2', 'Example Processor B', 210000),
+    cpu('zol-unknown-3', 'Example Processor C', 230000),
+  ], [
+    cpu('buildcores-same', 'Intel 酷睿 i5-14600K'),
+    cpu('buildcores-kf', 'Intel Core i5-14600KF'),
+    cpu('buildcores-unknown', 'Example Processor'),
+  ]);
+  const { data: matching } = await request('/catalog/buildcores-same');
+  assert.deepEqual([matching.estimatedPriceCents, matching.estimateBasis, matching.estimateSamples], [139900, 'model', 1]);
+  for (const id of ['buildcores-kf', 'buildcores-unknown']) {
+    assert.equal((await request('/catalog/' + id)).data.estimatedPriceCents, undefined);
+  }
+});
+
+test('同规格估价规范化容量和能效，过滤过低样本，至少保留三件', async t => {
+  const part = (id, category, specs, referencePriceCents) => ({ id, name: id, category, specs, referencePriceCents });
+  const ddr5 = { memoryType: 'DDR5', capacityGB: 32, modules: 2 };
+  const ssd = (capacityGB, connection) => ({ capacityGB, interface: connection });
+  const psu = (ratedWatts, efficiency) => ({ ratedWatts, efficiency });
+  const request = await estimateFixture(t, [
+    ...[10000, 39100, 45600, 51900].map((p, i) => part('zol-ram-' + i, 'RAM', ddr5, p)),
+    ...[20000, 38900, 39900].map((p, i) => part('zol-ram-small-' + i, 'RAM', { ...ddr5, modules: 1 }, p)),
+    part('zol-psu-1', 'PSU', psu(749, '金牌'), 45800),
+    part('zol-psu-2', 'PSU', psu(750, '80+ Gold'), 50300),
+    part('zol-psu-3', 'PSU', psu(760, '80 Plus Gold'), 58000),
+    part('zol-ssd-1', 'SSD', ssd(1000, 'M.2 PCIe 4.0'), 46800),
+    part('zol-ssd-2', 'SSD', ssd(1024, 'PCIe Gen 4 x4'), 52500),
+    part('zol-ssd-3', 'SSD', ssd(1024, 'PCI-E 4.0'), 55000),
+  ], [
+    part('buildcores-ram', 'RAM', ddr5),
+    part('buildcores-single', 'RAM', { ...ddr5, modules: 1 }),
+    part('buildcores-psu', 'PSU', psu(751, '80+ Gold')),
+    part('buildcores-unknown-psu', 'PSU', psu(750, undefined)),
+    part('buildcores-ssd', 'SSD', ssd(1024, 'PCIe4.0 x4')),
+    part('buildcores-sata', 'SSD', ssd(1024, 'SATA 6Gbps')),
+    part('buildcores-unknown-ssd', 'SSD', ssd(1024, 'NVMe')),
+  ]);
+  for (const [id, price] of [['ram', 46000], ['psu', 50000], ['ssd', 53000]]) {
+    const { data } = await request('/catalog/buildcores-' + id);
+    assert.deepEqual([data.estimatedPriceCents, data.estimateBasis, data.estimateSamples], [price, 'spec-median', 3]);
+  }
+  for (const id of ['single', 'unknown-psu', 'sata', 'unknown-ssd']) {
+    assert.equal((await request('/catalog/buildcores-' + id)).data.estimatedPriceCents, undefined);
+  }
+  assert.equal((await request('/catalog/zol-ram-0')).data.estimatedPriceCents, 10000);
+});
+
+test('目录按市场筛选，自动方案与推荐只使用国内条目', async t => {
+  const cpu = { name: 'AMD Ryzen 5 7500F', category: 'CPU', specs: { socket: 'AM5' } };
+  const request = await estimateFixture(t, [
+    { ...cpu, id: 'zol-domestic', referencePriceCents: 110000 },
+    { id: 'zol-merge', name: '海外条目合并 ZOL', category: 'RAM', specs: {}, mpn: 'MERGE-001' },
+  ], [
+    { ...cpu, id: 'buildcores-priced', partNumbers: [] },
+    { id: 'buildcores-merge', name: 'BuildCores 内存', category: 'RAM', specs: {},
+      mpn: 'MERGE-001', partNumbers: ['MERGE-001'] },
+    { id: 'buildcores-official', name: '全球官网型号', category: 'GPU', specs: {},
+      manufacturer: 'ASUS', partNumbers: ['DUAL-RTX5060TI-O16G'] },
+  ]);
+  const { data: domestic } = await request('/catalog?market=cn');
+  const { data: global } = await request('/catalog?market=global');
+  const { data: all } = await request('/catalog');
+  assert.equal(domestic.total + global.total, all.total);
+  assert.ok(domestic.items.every(item => item.market === 'cn'));
+  assert.ok(domestic.items.some(item => item.id === 'amd-ryzen-7-9700x'));
+  assert.equal(domestic.items.find(item => item.id === 'buildcores-merge').zolId, 'zol-merge');
+  assert.equal(domestic.items.find(item => item.id === 'asus-dual-rtx5060ti-o16g').dataSource, 'buildcores');
+  assert.deepEqual(global.items.map(item => [item.id, item.market, item.estimateBasis]),
+    [['buildcores-priced', 'global', 'model']]);
+  assert.equal((await request('/catalog?market=invalid')).status, 400);
+  const input = { budgetCents: 800000, scenarios: ['2k'] };
+  const plans = await request('/plans', 'POST', input);
+  assert.equal(plans.status, 200);
+  const planPicks = plans.data.plans.flatMap(plan => plan.picks);
+  const recommendation = await request('/recommend', 'POST', input);
+  for (const picks of [planPicks, recommendation.data.picks]) {
+    assert.ok(picks.some(pick => pick.item.id === 'zol-domestic'));
+    assert.ok(picks.every(pick => pick.item.market === 'cn'));
+  }
 });

@@ -20,10 +20,9 @@ export class LocalStore {
     } finally { await unlink(temp).catch(() => {}); }
   }
 
-  // Across CLI processes, reserve a request before sending it. Never silently reset a corrupt ledger.
-  async reserveRequest({ limit, unitCost, now = Date.now() }) {
+  async withLock(name, action) {
     await mkdir(this.directory, { recursive: true });
-    const lockPath = path.join(this.directory, 'usage.lock');
+    const lockPath = path.join(this.directory, name);
     let lock;
     for (let attempt = 0; attempt < 100; attempt++) {
       try { lock = await open(lockPath, 'wx'); break; }
@@ -32,8 +31,18 @@ export class LocalStore {
         await new Promise(resolve => setTimeout(resolve, 20));
       }
     }
-    if (!lock) throw new Error('调用记录被占用；确认没有运行中的任务后检查 .runtime/usage.lock');
+    if (!lock) throw new ApiError(503, 'STORE_BUSY', `本地数据正在保存，请稍后重试。若持续失败，请确认没有运行中的任务后检查 ${name}。`);
     try {
+      return await action();
+    } finally {
+      await lock.close();
+      await unlink(lockPath);
+    }
+  }
+
+  // Across CLI processes, reserve a request before sending it. Never silently reset a corrupt ledger.
+  async reserveRequest({ limit, unitCost, now = Date.now() }) {
+    return this.withLock('usage.lock', async () => {
       const days = await this.read('usage.json', {});
       const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
       const usage = days[day] ?? { attemptedRequests: 0, estimatedGrossUsd: 0, unpricedRequests: 0 };
@@ -45,6 +54,6 @@ export class LocalStore {
       days[day] = usage;
       await this.write('usage.json', days);
       return { day, ...usage };
-    } finally { await lock.close(); await unlink(lockPath); }
+    });
   }
 }
