@@ -282,3 +282,20 @@
   .nx-main { flex: 1; }
   .nx-build-table { min-width: 500px; }
 }
+
+/* 搜索联想 */
+.nx-suggest { position: relative; flex: 1; min-width: 0; display: flex; }
+.nx-suggest > .nx-search { flex: 1; }
+.nx-suggest-list { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; max-height: 360px; overflow-y: auto; margin: 0; padding: 4px;
+  list-style: none; background: var(--surface, #fff); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: 0 10px 28px rgba(0, 0, 0, .14); scrollbar-width: thin; }
+.nx-suggest-list li { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.nx-suggest-list li.active { background: var(--surface-2, #f1f3f2); }
+.nx-suggest-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.nx-suggest-name strong { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-suggest-name small { font-size: 11px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-suggest-price { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nx-suggest-list li.nx-suggest-empty { display: block; cursor: default; color: var(--ink-2); font-size: 13px; }
+
+/* 价格说明与疑似旧价 */
+.nx-price-note { flex: none; margin: 0; padding: 8px 14px 10px; font-size: 12px; line-height: 1.5; color: var(--ink-2); border-top: 1px solid var(--line); }
+.nx-stale { display: block; font-size: 11px; font-weight: 600; color: var(--amber, #a86200); }

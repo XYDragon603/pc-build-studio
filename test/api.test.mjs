@@ -361,10 +361,57 @@ test('同规格估价规范化容量和能效，过滤过低样本，至少保�
     const { data } = await request('/catalog/buildcores-' + id);
     assert.deepEqual([data.estimatedPriceCents, data.estimateBasis, data.estimateSamples], [price, 'spec-median', 3]);
   }
+  // 细分组凑不齐样本的，退到同类粗估（同容量内存、同功率电源、同容量固态）
   for (const id of ['single', 'unknown-psu', 'sata', 'unknown-ssd']) {
-    assert.equal((await request('/catalog/buildcores-' + id)).data.estimatedPriceCents, undefined);
+    assert.equal((await request('/catalog/buildcores-' + id)).data.estimateBasis, 'class-median');
   }
-  assert.equal((await request('/catalog/zol-ram-0')).data.estimatedPriceCents, 10000);
+  // 同规格 4 个样本里低于中位价 60% 的参考价视为旧价：保留原参考价，估算价改用同规格中位价
+  const { data: stale } = await request('/catalog/zol-ram-0');
+  assert.deepEqual([stale.referencePriceCents, stale.estimatedPriceCents, stale.estimateBasis, stale.possiblyStale], [10000, 46000, 'spec-median', true]);
+  assert.equal((await request('/catalog/zol-ram-1')).data.possiblyStale, undefined);
+});
+
+test('同类粗估：主板按芯片组、机箱按尺寸、显卡按芯片（忽略显存），系列起价不进自动方案', async t => {
+  const part = (id, category, specs, extra = {}) => ({ id, name: id, category, specs, ...extra });
+  const board = (formFactor, p, i) => part('zol-b650-' + i, 'MOTHERBOARD', { chipset: 'AMD B650', formFactor, socket: 'AM5' }, { referencePriceCents: p });
+  const request = await estimateFixture(t, [
+    board('Micro ATX', 80000, 1), board('Micro-ATX', 90000, 2), board('Micro ATX', 100000, 3), board('ATX', 150000, 4),
+    ...[20000, 30000, 40000].map((p, i) => part('zol-case-' + i, 'CASE', { maxBoardFormFactor: 'ATX' }, { referencePriceCents: p })),
+    part('zol-3080', 'GPU', { chipset: 'GeForce RTX 3080', capacityGB: 10 }, { referencePriceCents: 350000 }),
+    part('zol-ssd-series', 'SSD', { capacityGB: 960, interface: 'SATA' }, { priceRangeCents: [36900, 200900] }),
+  ], [
+    part('buildcores-b650m', 'MOTHERBOARD', { chipset: 'AMD B650', formFactor: 'Micro ATX' }),
+    part('buildcores-b650-itx', 'MOTHERBOARD', { chipset: 'AMD B650', formFactor: 'Mini ITX' }),
+    part('buildcores-case', 'CASE', { formFactor: 'ATX Mid Tower' }),
+    part('buildcores-3080', 'GPU', { chipset: 'GeForce RTX 3080 10 GB', capacityGB: 10 }),
+  ]);
+  const basis = async id => { const { data } = await request('/catalog/' + id); return [data.estimatedPriceCents, data.estimateBasis]; };
+  assert.deepEqual(await basis('buildcores-b650m'), [90000, 'spec-median']);
+  assert.deepEqual(await basis('buildcores-b650-itx'), [95000, 'class-median']);
+  assert.deepEqual(await basis('buildcores-case'), [30000, 'class-median']);
+  assert.deepEqual(await basis('buildcores-3080'), [350000, 'chip-median']);
+  assert.deepEqual(await basis('zol-ssd-series'), [36900, 'series-low']);
+  const plans = await request('/plans', 'POST', { budgetCents: 800000, scenarios: ['2k'] });
+  assert.ok(plans.data.plans.flatMap(plan => plan.picks).every(pick => !['series-low', 'class-median'].includes(pick.item.estimateBasis)));
+});
+
+test('输入联想：模糊匹配型号、中英文品牌互通，按匹配度排序', async t => {
+  const part = (id, name, extra = {}) => ({ id, name, category: 'GPU', specs: {}, referencePriceCents: 300000, ...extra });
+  const request = await estimateFixture(t, [
+    part('zol-a', '华硕 DUAL GeForce RTX 5060 Ti 16G', { manufacturer: '华硕' }),
+    part('zol-b', '七彩虹 战斧 GeForce RTX 5060 8G'),
+    part('zol-c', 'MSI GeForce RTX 5070 Ventus'),
+  ], []);
+  const names = async q => (await request('/catalog/suggest?category=GPU&q=' + encodeURIComponent(q))).data.items.map(i => i.id);
+  assert.equal((await names('5060ti'))[0], 'zol-a');
+  assert.ok((await names('asus 5060')).includes('zol-a'));
+  assert.ok((await names('微星')).includes('zol-c'));
+  assert.ok((await names('5060七彩虹')).includes('zol-b'));
+  // 漏字也能找到：rtx5o7 → 按顺序出现的字符
+  assert.ok((await names('rtx507ven')).includes('zol-c'));
+  assert.deepEqual(await names('   '), []);
+  assert.equal((await request('/catalog/suggest?category=XX&q=a')).status, 400);
+  assert.equal((await request('/catalog/suggest?q=a', 'POST', {})).status, 405);
 });
 
 test('目录按市场筛选，自动方案与推荐只使用国内条目', async t => {

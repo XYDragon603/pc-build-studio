@@ -1,13 +1,33 @@
 // 新界面用的目录查询：支持排序、筛选与国内 / 海外分组；按 ID 取条目并缓存（配件图片、性能都从这里来）。
 import { useEffect, useState } from 'react';
-import { api, type CatalogItem } from '../api/client';
+import { api, type CatalogItem, type EstimateBasis } from '../api/client';
 import { estimatePower } from '../domain/compat';
 import { isIntegratedGpu, STOCK_COOLER_NAME } from '../domain/plan';
 import type { Build, SlotId } from '../domain/types';
 
 export type SortKey = 'value' | 'price' | '-price' | 'perf';
 export type Market = 'cn' | 'global';
-export const ESTIMATE_LABELS = { reference: 'ZOL 参考价', model: '同型号估算', 'chip-median': '同芯片中位价', 'spec-median': '同规格中位价' };
+export const ESTIMATE_LABELS: Record<EstimateBasis, string> = {
+  reference: 'ZOL 参考价（非实时）', model: '同型号 ZOL 参考价（非实时）', 'chip-median': '同芯片中位价', 'spec-median': '同规格中位价',
+  'class-median': '同类配件粗估，误差较大', 'series-low': 'ZOL 系列起价（最小容量），实际容量可能更贵',
+};
+
+export const PRICE_NOTE = '参考价来自中关村在线，不是实时价格；内存、固态近期涨价快，下单前以电商实际售价为准，填进“实付价”后合计按实付计算。';
+export const STALE_NOTE = '这款的 ZOL 参考价明显低于同规格其他型号，可能是涨价前的旧价，已按同规格中位价估算，自动方案不会选它';
+
+/** 列表里的价格文字：粗估加“≈”，系列起价加“起” */
+export function estimateText(item: Pick<CatalogItem, 'estimatedPriceCents' | 'estimateBasis'>, format: (c: number) => string): string {
+  if (item.estimatedPriceCents == null) return '暂无估算价';
+  const text = format(item.estimatedPriceCents);
+  if (item.estimateBasis === 'series-low') return `${text} 起`;
+  if (item.estimateBasis === 'class-median') return `≈${text}`;
+  return text;
+}
+
+/** 输入框联想 */
+export function suggestCatalog({ category, q, market }: { category: string; q: string; market: Market }, signal?: AbortSignal) {
+  return api.catalogSuggest(new URLSearchParams({ category, q: q.trim().slice(0, 120), market, limit: '8' }), signal);
+}
 
 export interface CatalogQuery {
   category: string;

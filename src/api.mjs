@@ -65,15 +65,21 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 /** 提供前端构建产物（web/dist）；找不到的路径回到 index.html。只允许读 staticDir 之内的文件 */
 async function serveStatic(staticDir, pathname, response) {
   const safe = normalize(decodeURIComponent(pathname)).replace(/^([/\\])+/, '');
-  let file = join(staticDir, safe || 'index.html');
-  if (!file.startsWith(normalize(staticDir) + sep) && file !== normalize(staticDir)) file = join(staticDir, 'index.html');
+  // 去掉结尾分隔符再比较，否则“dist/”会变成“dist\\”前缀，所有文件都回落成 index.html
+  const root = normalize(staticDir).replace(/[\\/]+$/, '');
+  let file = join(root, safe || 'index.html');
+  if (!file.startsWith(root + sep)) file = join(root, 'index.html');
   let body;
   try { body = await readFile(file); }
-  catch { file = join(staticDir, 'index.html'); body = await readFile(file); }
+  catch { file = join(root, 'index.html'); body = await readFile(file); }
   response.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream', 'X-Content-Type-Options': 'nosniff',
     'Cache-Control': file.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable' });
   response.end(body);
 }
+
+/** 自动配置只用较可靠的价格：系列起价、同类粗估、疑似旧价不参与 */
+const forPlans = item => item.market === 'cn' && !item.possiblyStale
+  && item.estimateBasis !== 'series-low' && item.estimateBasis !== 'class-median';
 
 export function createApiServer({ directory, catalogDirectory = directory, staticDir = null,
   provider = new BraveSearch(), inspect, jdUnion = new JdUnion({ directory }), onError = console.error } = {}) {
@@ -112,6 +118,7 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
       }
       if (pathname === '/api/v1/slot-types' && method === 'GET') return json(response, 200, { items: slotTypes });
       if (pathname === '/api/v1/catalog' && method === 'GET') return json(response, 200, catalog.list(url.searchParams));
+      if (pathname === '/api/v1/catalog/suggest' && method === 'GET') return json(response, 200, catalog.suggest(url.searchParams));
       if (singleProduct && method === 'GET') return json(response, 200, catalog.get(singleProduct[1]));
       if (pathname === '/api/v1/templates/demo' && method === 'GET') return json(response, 200, calculateBuild(buildTemplate('demo')));
       if (pathname === '/api/v1/draft' && method === 'GET') return json(response, 200, { draft: await store.read('draft.json', null) });
@@ -143,7 +150,7 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         const { budgetCents, scenarios = [] } = await readJson(request);
         if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
         if (!Array.isArray(scenarios) || scenarios.length > 8 || !scenarios.every(s => typeof s === 'string' && s.length <= 32)) throw invalid('scenarios 格式无效');
-        return json(response, 200, { plans: recommendPlans(catalog.all().filter(item => item.market === 'cn'), { budgetCents, scenarios }) });
+        return json(response, 200, { plans: recommendPlans(catalog.all().filter(forPlans), { budgetCents, scenarios }) });
       }
       // data/images/ 下的本地商品图（data/part-images.json 引用）
       const imageMatch = /^\/api\/v1\/images\/([\w.-]+\.(?:jpe?g|png|webp|gif))$/i.exec(pathname);
@@ -172,7 +179,7 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
           if (!part || typeof part !== 'object' || (part.priceCents != null && !Number.isSafeInteger(part.priceCents))) throw invalid('locked 配件格式无效');
           lockedParts[slot] = { priceCents: part.priceCents ?? 0, specs: part.specs && typeof part.specs === 'object' ? part.specs : {} };
         }
-        return json(response, 200, recommend(catalog.all().filter(item => item.market === 'cn'), { budgetCents, scenarios, locked: lockedParts }));
+        return json(response, 200, recommend(catalog.all().filter(forPlans), { budgetCents, scenarios, locked: lockedParts }));
       }
       if (pathname === '/api/v1/quotes/jd' && method === 'POST') {
         const { skuIds } = await readJson(request);
@@ -195,10 +202,10 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         return json(response, 200, { ...report, target, results: report.results.map(quoteForClient) });
       }
 
-      const allowed = singleBuild ? 'GET, PUT, DELETE' : singleProduct ? 'GET' : {
+      const allowed = singleBuild ? 'GET, PUT, DELETE' : singleProduct && pathname !== '/api/v1/catalog/suggest' ? 'GET' : {
         '/api/v1/builds': 'GET, POST', '/api/v1/quotes/search': 'POST', '/api/v1/quotes/jd': 'POST', '/api/v1/recommend': 'POST', '/api/v1/plans': 'POST',
         '/api/v1/draft': 'GET, PUT', '/api/v1/builds/backup': 'GET, POST',
-        '/api/v1/catalog': 'GET',
+        '/api/v1/catalog': 'GET', '/api/v1/catalog/suggest': 'GET',
         '/api/v1/health': 'GET', '/api/v1/slot-types': 'GET', '/api/v1/templates/demo': 'GET',
       }[pathname];
       if (typeof allowed === 'string') {

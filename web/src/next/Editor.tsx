@@ -7,7 +7,7 @@ import { formatYuan } from '../domain/money';
 import { buildChecks, compatSummary, INTEGRATED_GPU_NAME, STOCK_COOLER_NAME } from '../domain/plan';
 import { SLOTS } from '../domain/slots';
 import type { Build, SlotId } from '../domain/types';
-import { ESTIMATE_LABELS, useCatalogItems } from './data';
+import { ESTIMATE_LABELS, PRICE_NOTE, STALE_NOTE, useCatalogItems } from './data';
 import { Thumb } from './Thumb';
 
 interface Props {
@@ -66,7 +66,7 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
           <header className="nx-section-head"><h2 id="nx-build-heading">配置清单</h2><span className="nx-muted">已选 {t.filled} / {t.slotCount} 项</span></header>
           <div className="nx-table-scroll">
             <table className="nx-build-table" aria-label="当前方案配件">
-              <thead><tr><th scope="col">配件</th><th scope="col">产品与规格</th><th scope="col">参考价</th><th scope="col">实付价</th><th scope="col"><span className="sr-only">操作</span></th></tr></thead>
+              <thead><tr><th scope="col">配件</th><th scope="col">产品与规格</th><th scope="col" title={PRICE_NOTE}>参考价</th><th scope="col">实付价</th><th scope="col"><span className="sr-only">操作</span></th></tr></thead>
               <tbody>
                 {SLOTS.map(({ id, label }) => {
                   const { part, locked } = build.slots[id];
@@ -89,7 +89,10 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
                           </span>
                         </button>
                       </td>
-                      <td className="nx-amount" title={reference == null || placeholder ? undefined : basis}>{reference == null || placeholder ? '—' : formatYuan(reference)}</td>
+                      <td className="nx-amount" title={reference == null || placeholder ? undefined : item?.possiblyStale ? `${basis} · ${STALE_NOTE}` : basis}>
+                        {reference == null || placeholder ? '—' : formatYuan(reference)}
+                        {item?.possiblyStale && !placeholder && <small className="nx-stale">可能是旧价</small>}
+                      </td>
                       <td className="nx-amount">
                         {part && !placeholder
                           ? <button type="button" className={`nx-price-edit${actual == null ? ' is-unset' : ''}`} onClick={() => onEditPrice(id)} disabled={locked} aria-label={`编辑${label}实付价`}>{actual == null ? '填写' : formatYuan(actual)}</button>
@@ -110,6 +113,7 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
               </tbody>
             </table>
           </div>
+          <p className="nx-price-note">{PRICE_NOTE}</p>
         </section>
 
         {activeSlot ? picker : (

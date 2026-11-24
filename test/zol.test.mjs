@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { boardFormFactor, countOf, maxRadiator, parseList, parseParams, parseRamCapacity, parseSockets } from '../scripts/import-zol.mjs';
+import { boardFormFactor, countOf, listPage, maxRadiator, parseList, parseParams, parseRamCapacity, parseSockets } from '../scripts/import-zol.mjs';
 
 // 按 ZOL 页面结构写的最小合成片段，不含站点原文
 const list = `
@@ -22,6 +22,18 @@ test('ZOL 列表页：去掉卖点副标题，未知价格保留 null', () => {
   assert.deepEqual(items[0], { zolId: '2130983', name: '示例品牌GeForce RTX 5060 Ti 测试版 16G',
     referencePriceCents: 409900, imageUrl: 'https://2d.zol-img.com.cn/product/x.png' });
   assert.equal(items[1].referencePriceCents, null);
+});
+
+test('ZOL 列表页地址：默认与热门排序分页、缓存名互不冲突', () => {
+  assert.deepEqual(listPage('solid_state_drive', 1), { url: 'https://detail.zol.com.cn/solid_state_drive/', cacheName: 'list-solid_state_drive-1.html' });
+  assert.deepEqual(listPage('solid_state_drive', 2, 'hot'), { url: 'https://detail.zol.com.cn/solid_state_drive/hot_2.html', cacheName: 'list-solid_state_drive-hot-2.html' });
+  assert.equal(listPage('vga', 1, 'hot').url, 'https://detail.zol.com.cn/vga/hot.html');
+});
+
+test('ZOL 列表页：系列产品的价格区间单独记录，不当成参考价', () => {
+  const [item] = parseList('<li data-follow-id="p9"><h3><a href="#">示例固态硬盘系列</a></h3><b class="price-type">359-1799</b></li>');
+  assert.equal(item.referencePriceCents, null);
+  assert.deepEqual(item.priceRangeCents, [35900, 179900]);
 });
 
 test('ZOL 参数页：读取参数表、英文名与中文品牌，不把“纠错”带进值', () => {

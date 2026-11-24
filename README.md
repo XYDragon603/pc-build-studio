@@ -72,16 +72,18 @@ npm run catalog:zol -- --category CPU --limit 200          # 也支持 MOTHERBOA
 目录里的型号带估算价：有 ZOL 参考价就用参考价；显卡没有参考价时，用同芯片同显存至少 3 款的参考价中位数。网页上点“按估算价加入”，配置里显示“约 ¥x”，合计注明含几件估算；点价格可改成实付价，改过的价格不会再被刷新覆盖。
 
 ```powershell
-npm run catalog:prices    # 重抓已抓过的 ZOL 列表页（约 50 次请求），更新参考价并追加 .runtime/zol-price-history.jsonl
+npm run catalog:prices    # 重抓已抓过的 ZOL 列表页（默认、热门排序都算，约 55 次请求），更新参考价并追加 .runtime/zol-price-history.jsonl
 ```
 
-刷新后重启 `npm start`，再在网页右侧点“刷新估算价”。建议每周一次；参考价不是实时报价，下单前以商城价格为准。
+刷新后重启 `npm start`，再在网页右侧点“刷新估算价”。建议每周一两次；参考价不是实时报价，下单前以商城价格为准。
 
 ## 价格走势与降价提醒
 
+固态硬盘另外抓了 ZOL “热门”排序的列表（`node scripts/import-zol.mjs --category SSD --order hot --limit 150`）：默认列表多是按系列列出的老型号，只有价格区间；热门列表是当前在售的具体容量，有单一参考价。
+
 每次 `npm run catalog:prices` 都会把参考价追加到 `.runtime/zol-price-history.jsonl`。目录卡片显示“较上次 ↓/↑”和记录最低价；打开方案时会核对已选配件：估算价有变化可一键刷新，手动填的价格高于当前参考价也会提示（不会自动改）。
 
-已注册 Windows 计划任务 `PCBuilder-RefreshPrices`：每周日 10:00 在项目目录运行 `npm run catalog:prices`，错过时开机后补跑，日志在 `.runtime/zol-prices-scheduled.log`。不需要时可删除：
+已注册 Windows 计划任务 `PCBuilder-RefreshPrices`：每周日、周三 10:00 在项目目录运行 `npm run catalog:prices`，错过时开机后补跑，日志在 `.runtime/zol-prices-scheduled.log`。不需要时可删除：
 
 ```powershell
 Unregister-ScheduledTask -TaskName PCBuilder-RefreshPrices -Confirm:$false

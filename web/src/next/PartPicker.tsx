@@ -1,4 +1,4 @@
-import { ArrowDownUp, Check, ChevronDown, Circle, Loader2, Plus, Search, X } from 'lucide-react';
+import { ArrowDownUp, Check, ChevronDown, Circle, Loader2, Plus, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CatalogItem } from '../api/client';
 import { SLOT_TO_API } from '../api/mapping';
@@ -7,7 +7,8 @@ import { catalogToCandidate } from '../domain/catalog';
 import { formatYuan } from '../domain/money';
 import { SLOTS, slotDef } from '../domain/slots';
 import type { Build, SlotId } from '../domain/types';
-import { ESTIMATE_LABELS, fitForSlot, queryCatalog, type Market, type SortKey } from './data';
+import { ESTIMATE_LABELS, estimateText, fitForSlot, STALE_NOTE, queryCatalog, type Market, type SortKey } from './data';
+import { SearchSuggest } from './SearchSuggest';
 import { Thumb } from './Thumb';
 
 interface Props {
@@ -20,7 +21,7 @@ interface Props {
 }
 
 const SORTS: [SortKey, string][] = [['value', '性价比'], ['price', '价格从低到高'], ['-price', '价格从高到低'], ['perf', '性能最强']];
-const priceText = (value: number | null | undefined) => value == null ? '暂无估算价' : formatYuan(value);
+const priceText = (item: CatalogItem) => estimateText(item, formatYuan);
 
 export function PartPicker({ slot, build, onClose, onPick, onIntegrated, onCategory }: Props) {
   const [q, setQ] = useState('');
@@ -36,6 +37,12 @@ export function PartPicker({ slot, build, onClose, onPick, onIntegrated, onCateg
   const [compare, setCompare] = useState<CatalogItem[]>([]);
   const pending = useRef<AbortController | null>(null);
   const fit = useMemo(() => fitForSlot(slot, build), [slot, build]);
+
+  // 停止输入 350ms 后自动按关键词筛选列表，不用点“搜索”
+  useEffect(() => {
+    const id = window.setTimeout(() => setQuery(q.trim()), 350);
+    return () => window.clearTimeout(id);
+  }, [q]);
 
   const load = useCallback((offset: number) => {
     pending.current?.abort();
@@ -93,11 +100,19 @@ export function PartPicker({ slot, build, onClose, onPick, onIntegrated, onCateg
             <label className="nx-toggle nx-fit-toggle"><input type="checkbox" role="switch" checked={onlyFit} onChange={e => setOnlyFit(e.target.checked)} />隐藏不兼容</label>
           </div>
           <div className="nx-picker-options">
-            <label className="nx-search">
-              <Search size={16} aria-hidden />
-              <input value={q} onChange={e => setQ(e.target.value)} placeholder="搜索型号或品牌" aria-label="搜索型号或品牌" maxLength={120} />
-              <button type="submit" aria-label="搜索配件">搜索</button>
-            </label>
+            <SearchSuggest
+              category={SLOT_TO_API[slot]}
+              market={market}
+              slot={slot}
+              value={q}
+              onChange={setQ}
+              onSubmit={() => setQuery(q.trim())}
+              onChoose={item => {
+                setQ(item.name);
+                setQuery(item.name);
+                if (onCategory) { if (!compare.some(entry => entry.id === item.id)) switchCompare(item); } else setSelected(item);
+              }}
+            />
             <label className="nx-sort" title="排序"><ArrowDownUp size={15} aria-hidden /><select value={sort} onChange={e => setSort(e.target.value as SortKey)} aria-label="排序">{SORTS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select></label>
           </div>
         </form>
@@ -119,8 +134,9 @@ export function PartPicker({ slot, build, onClose, onPick, onIntegrated, onCateg
                   <Thumb src={item.imageUrl} slot={slot} size="sm" />
                   <span className="nx-pick-name"><strong title={item.name}>{item.name}</strong><small title={item.summary}>{item.summary}</small></span>
                   <span className="nx-pick-value">
-                    <strong title={item.estimateBasis ? ESTIMATE_LABELS[item.estimateBasis] : undefined}>{priceText(item.estimatedPriceCents)}</strong>
+                    <strong title={item.estimateBasis ? ESTIMATE_LABELS[item.estimateBasis] : undefined}>{priceText(item)}</strong>
                     {isCurrent ? <small className="nx-tag">当前选择</small> : change ? <small className={`nx-tag ${change > 0 ? 'warn' : 'ok'}`}>{change > 0 ? '+ ' : '省 '}{formatYuan(Math.abs(change))}</small> : null}
+                    {item.possiblyStale && <small className="nx-tag warn" title={`${STALE_NOTE}（ZOL 参考价 ${item.referencePriceCents ? formatYuan(item.referencePriceCents) : '—'}）`}>可能是旧价</small>}
                     {item.compatibility === 'unknown' && <small className="nx-tag warn">规格待核对</small>}
                     {item.compatibility === 'conflict' && <small className="nx-tag error">规格冲突</small>}
                   </span>
@@ -162,7 +178,7 @@ function CatalogComparison({ slot, items, onRemove, onClear }: { slot: SlotId; i
               <Thumb src={item.imageUrl} slot={slot} size="md" /><strong>{item.name}</strong>
             </th>)}</tr></thead>
             <tbody>
-              <tr><th scope="row">估算价</th>{items.map(i => <td key={i.id}>{priceText(i.estimatedPriceCents)}</td>)}</tr>
+              <tr><th scope="row">估算价</th>{items.map(i => <td key={i.id}>{priceText(i)}</td>)}</tr>
               <tr><th scope="row">关键规格</th>{items.map(i => <td key={i.id}>{i.summary || '待核对'}</td>)}</tr>
               <tr><th scope="row">当前配置</th>{items.map(i => <td key={i.id}>{i.compatibility === 'pass' ? '规格匹配' : i.compatibility === 'conflict' ? '规格冲突' : '待核对'}</td>)}</tr>
               {items.some(i => i.performance?.gaming) && <tr><th scope="row">游戏指数</th>{items.map(i => <td key={i.id} title={i.performance?.gaming?.label ?? undefined}>{i.performance?.gaming ? `${i.performance.gaming.index}%` : '—'}</td>)}</tr>}

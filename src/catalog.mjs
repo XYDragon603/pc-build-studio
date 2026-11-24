@@ -178,7 +178,7 @@ function addReferenceAndChipEstimates(items) {
     if (item.referencePriceCents) {
       // 显卡参考价比同芯片中位价低 40% 以上，多半是数据错误，不作估算价
       const chipMedian = samples.length >= 3 ? median(samples) : null;
-      if (chipMedian && item.referencePriceCents < chipMedian * 0.6) return item;
+      if (chipMedian && item.referencePriceCents < chipMedian * 0.6) return { ...item, possiblyStale: true };
       return { ...item, estimatedPriceCents: item.referencePriceCents, estimateBasis: 'reference', estimateSamples: 1 };
     }
     if (samples.length >= 3) {
@@ -201,7 +201,7 @@ function efficiencyTier(value) {
 
 function ssdKey({ capacityGB, interface: connection }) {
   // 同一标称容量可能以 1000/1024 GB（或 500/512 GB）记录。
-  const tier = [500, 1000, 2000, 4000].find(gb => Math.abs(capacityGB - gb) <= gb * 0.05);
+  const tier = [128, 256, 500, 1000, 2000, 4000].find(gb => Math.abs(capacityGB - gb) <= gb * 0.07);
   if (!tier) return null;
   const bus = (connection ?? '').normalize('NFKC');
   const gen = bus.match(/\bPCI[\s-]*E(?:XPRESS)?\s*(?:GEN\s*)?([345])(?:\.0)?(?![\d.])/i)?.[1];
@@ -250,11 +250,166 @@ function addEstimates(items) {
       }
     }
   }
+  // ZOL 有些参考价多年没改（内存涨价前的旧价）：同规格至少 4 个样本、低于中位价 60% 的，
+  // 标记为“可能是旧价”，估算价改用同规格中位价，自动方案不选它
+  const medians = new Map([...groups].filter(([, samples]) => samples.length >= 4).map(([key, samples]) => [key, median(samples)]));
   return base.map((item, index) => {
-    if (item.estimatedPriceCents > 0) return item;
     const estimate = estimates.get(keys[index]);
+    if (item.estimatedPriceCents > 0) {
+      const groupMedian = medians.get(keys[index]);
+      if (item.estimateBasis !== 'reference' || !groupMedian || item.estimatedPriceCents >= groupMedian * 0.6) return item;
+      return estimate && estimate.estimateBasis === 'spec-median'
+        ? { ...item, ...estimate, possiblyStale: true }
+        : { ...item, possiblyStale: true };
+    }
     return estimate ? { ...item, ...estimate } : item;
   });
+}
+
+/** 板型 / 机箱尺寸归类 */
+function sizeClass(value) {
+  const v = normalize(value);
+  if (!v) return null;
+  if (/eatx|fulltower|全塔|xlatx/.test(v)) return 'eatx';
+  if (/itx|sff/.test(v)) return 'itx';
+  if (/micro|matx|microatx/.test(v)) return 'matx';
+  if (/atx|midtower|中塔/.test(v)) return 'atx';
+  return null;
+}
+
+/**
+ * 同类粗估的分组键，由细到粗；只用真实参考价做样本。
+ * 返回 [键, 依据] 列表：细的叫 spec-median，粗的叫 class-median。
+ */
+function classGroups(item) {
+  const s = item.specs ?? {};
+  switch (item.category) {
+    case 'GPU': {
+      // 海外数据的芯片名常带显存（“GeForce RTX 3080 10 GB”），去掉后按芯片归组
+      const chip = s.chipset ? normalize(String(s.chipset).replace(/^(geforce|radeon|intel)\s*/i, '').replace(/\s*\d+\s*gb$/i, '')) : null;
+      return chip ? [[`chip:${chip}`, 'chip-median']] : [];
+    }
+    case 'MOTHERBOARD': {
+      const chip = s.chipset ? normalize(String(s.chipset).replace(/^(amd|intel)\s*/i, '')) : null;
+      if (!chip) return [];
+      const size = sizeClass(s.formFactor);
+      return [...(size ? [[`${chip}:${size}`, 'spec-median']] : []), [chip, 'class-median']];
+    }
+    case 'CASE': {
+      const size = sizeClass(s.formFactor ?? s.maxBoardFormFactor);
+      return size ? [[size, 'class-median']] : [];
+    }
+    case 'COOLER': {
+      const liquid = s.radiatorSizeMm > 0 || /水冷|liquid|aio/i.test(String(s.coolingType ?? '') + item.name);
+      if (liquid) {
+        const r = [120, 240, 280, 360, 420].find(mm => Math.abs((s.radiatorSizeMm ?? 0) - mm) <= 10);
+        return [...(r ? [[`aio:${r}`, 'spec-median']] : []), ['aio', 'class-median']];
+      }
+      const h = s.heightMm > 0 ? (s.heightMm < 120 ? 'low' : s.heightMm < 150 ? 'mid' : 'tower') : null;
+      return [...(h ? [[`air:${h}`, 'spec-median']] : []), ['air', 'class-median']];
+    }
+    case 'CPU': {
+      // 同接口、同核心数的中位价（如 AM5 6 核）
+      return s.socket && s.cores > 0 ? [[`${normalize(s.socket)}:${s.cores}`, 'class-median']] : [];
+    }
+    case 'PSU': {
+      const w = s.ratedWatts > 0 ? Math.round(s.ratedWatts / 50) * 50 : null;
+      return w ? [[`w:${w}`, 'class-median']] : [];
+    }
+    case 'RAM': {
+      return s.memoryType && s.capacityGB > 0 ? [[`${normalize(s.memoryType)}:${s.capacityGB}`, 'class-median']] : [];
+    }
+    case 'SSD': {
+      const key = ssdKey(s);
+      const tier = key?.split(':')[0];
+      return [...(key && !key.endsWith('unknown') ? [[key, 'spec-median']] : []), ...(tier ? [[`cap:${tier}`, 'class-median']] : [])];
+    }
+    default: return [];
+  }
+}
+
+/** 仍没有估算价的条目：按同类真实参考价的中位数粗估（至少 3 个样本） */
+function addClassEstimates(items) {
+  const pools = new Map();
+  for (const item of items) {
+    if (!(item.referencePriceCents > 0) || item.estimateBasis !== 'reference') continue;
+    for (const [key] of classGroups(item)) {
+      const k = item.category + ':' + key;
+      if (!pools.has(k)) pools.set(k, []);
+      pools.get(k).push(item.referencePriceCents);
+    }
+  }
+  return items.map(item => {
+    if (item.estimatedPriceCents > 0) return item;
+    // ZOL 系列价格区间：只给起价，界面显示“起”，不参与自动配置
+    if (Array.isArray(item.priceRangeCents) && item.priceRangeCents[0] > 0) {
+      return { ...item, estimatedPriceCents: item.priceRangeCents[0], estimateBasis: 'series-low', estimateSamples: 1 };
+    }
+    for (const [key, basis] of classGroups(item)) {
+      const samples = pools.get(item.category + ':' + key) ?? [];
+      // 同芯片显卡 1 个真实参考价就可用；其他粗分组至少 3 个样本
+      if (samples.length < (basis === 'chip-median' ? 1 : 3)) continue;
+      return { ...item, estimatedPriceCents: Math.round(median(samples) / 1000) * 1000, estimateBasis: basis, estimateSamples: samples.length };
+    }
+    return item;
+  });
+}
+
+/** 中英文品牌名互通：搜“华硕”能找到 ASUS，反之亦然 */
+const BRAND_ALIASES = [
+  ['asus', '华硕'], ['msi', '微星'], ['gigabyte', '技嘉'], ['asrock', '华擎'], ['colorful', '七彩虹'], ['galax', '影驰'], ['zotac', '索泰'],
+  ['maxsun', '铭瑄'], ['sapphire', '蓝宝石'], ['powercolor', '撼讯'], ['xfx', '讯景'], ['vastarmor', '瀚铠'], ['gainward', '耕升'], ['inno3d', '映众'],
+  ['palit', '同德'], ['yeston', '盈通'], ['intel', '英特尔'], ['amd', '超威'], ['nvidia', '英伟达'], ['kingston', '金士顿'], ['samsung', '三星'],
+  ['westerndigital', '西部数据', '西数', 'wd'], ['crucial', '英睿达'], ['corsair', '海盗船'], ['gskill', '芝奇'], ['kingbank', '金百达'], ['teamgroup', '十铨'],
+  ['adata', '威刚'], ['zhitai', '致态'], ['kioxia', '铠侠'], ['seagate', '希捷'], ['sandisk', '闪迪'], ['lexar', '雷克沙'], ['hikvision', '海康威视'],
+  ['thermalright', '利民'], ['deepcool', '九州风神'], ['coolermaster', '酷冷至尊'], ['noctua', '猫头鹰'], ['arctic', '北极'], ['idcooling', '酷凛'],
+  ['greatwall', '长城'], ['huntkey', '航嘉'], ['seasonic', '海韵'], ['superflower', '振华'], ['segotep', '鑫谷'], ['sama', '先马'], ['aigo', '爱国者'],
+  ['lianli', '联力'], ['phanteks', '追风者'], ['nzxt', '恩杰'], ['jonsbo', '乔思伯'], ['fractaldesign', '分形工艺'], ['thermaltake', '曜越', 'tt'],
+  ['bequiet', '德商必酷'], ['montech', '君主'], ['antec', '安钛克'], ['silverstone', '银欣'], ['tforce', '十铨'],
+].map(group => group.map(normalize));
+
+function aliasTerms(text) {
+  const t = normalize(text);
+  const out = [];
+  for (const group of BRAND_ALIASES) {
+    // 2 个字符以内的英文简称（wd、tt）只在开头匹配，避免误伤
+    if (group.some(a => a.length > 2 ? t.includes(a) : t.startsWith(a))) out.push(...group);
+  }
+  return out;
+}
+
+/**
+ * 模糊匹配分数（0 = 不匹配）。query 与 terms 都已 normalize。
+ * 完全相等 > 前缀 > 包含 > 多词都命中 > 按顺序出现的字符（容忍漏字、多字）
+ */
+function matchScore(terms, compact, tokens) {
+  if (!compact) return 1;
+  let best = 0;
+  for (const term of terms) {
+    if (!term) continue;
+    if (term === compact) return 100;
+    if (term.startsWith(compact)) best = Math.max(best, 85);
+    else if (term.includes(compact)) best = Math.max(best, 70);
+  }
+  if (best) return best;
+  if (tokens.length > 1 && tokens.every(token => terms.some(term => term.includes(token)))) return 60;
+  if (compact.length < 3) return 0;
+  // 子序列：query 的字符按顺序出现在名称里，跨度越小分越高
+  const name = terms[0] ?? '';
+  let pos = -1; let first = -1;
+  for (const ch of compact) {
+    pos = name.indexOf(ch, pos + 1);
+    if (pos < 0) return 0;
+    if (first < 0) first = pos;
+  }
+  const span = pos - first + 1;
+  const density = compact.length / span;
+  return density >= 0.5 ? Math.round(20 + 30 * density) : 0;
+}
+
+/** 搜索词切分：空格分词，并在中文与字母数字之间断开（“4060七彩虹” → 4060 / 七彩虹） */
+function queryTokens(query) {
+  return query.split(/\s+|(?<=\p{Script=Han})(?=[^\p{Script=Han}])|(?<=[^\p{Script=Han}\s])(?=\p{Script=Han})/u).map(normalize).filter(Boolean);
 }
 
 function pagination(value, fallback, min, max, field) {
@@ -270,7 +425,7 @@ export function createCatalog(directory = '.runtime') {
   const imported = readImported(directory);
   const zol = readImported(directory, 'zol-catalog.json');
   const performance = loadPerformance(directory);
-  const items = addImages(addTrends(addEstimates(addZol(mergeCatalog(imported.items), zol.items)), readPriceHistory(directory))
+  const items = addImages(addTrends(addClassEstimates(addEstimates(addZol(mergeCatalog(imported.items), zol.items))), readPriceHistory(directory))
     .map(item => ({
       ...performance.attach(item),
       market: item.dataSource === 'zol' || item.zolId || verifiedIds.has(item.id) ? 'cn' : 'global',
@@ -278,7 +433,8 @@ export function createCatalog(directory = '.runtime') {
   const attributions = [imported.attribution, zol.attribution].filter(Boolean);
   const byId = new Map(items.map(item => [item.id, item]));
   const searchIndex = items.map(item => ({ item,
-    terms: [item.name, item.manufacturer, item.mpn, item.summary, ...item.aliases, ...(item.partNumbers ?? [])].map(normalize),
+    terms: [item.name, item.manufacturer, item.mpn, item.summary, ...item.aliases, ...(item.partNumbers ?? [])].map(normalize)
+      .concat(aliasTerms(`${item.manufacturer ?? ''} ${item.name}`)),
   }));
 
   return {
@@ -293,7 +449,7 @@ export function createCatalog(directory = '.runtime') {
       if (category && !categoryIds.has(category)) throw invalid('category 必须为标准槽位 ID');
       const limit = pagination(params.get('limit'), 24, 1, 100, 'limit');
       const offset = pagination(params.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER, 'offset');
-      const tokens = query.split(/\s+/u).map(normalize).filter(Boolean);
+      const tokens = queryTokens(query);
       const compactQuery = normalize(query);
       const hasPrice = params.get('hasPrice') === '1';
       const hasImage = params.get('hasImage') === '1';
@@ -303,13 +459,17 @@ export function createCatalog(directory = '.runtime') {
       if (!['cn', 'global', 'all'].includes(market)) throw invalid('market 只能是 cn、global 或 all');
       const fit = parseCatalogFit(params.get('fit'), category);
       const showConflicts = params.get('showConflicts') === '1';
-      let matches = searchIndex.filter(({ item, terms }) =>
+      let matches = searchIndex.filter(({ item }) =>
         (!category || item.category === category)
         && (market === 'all' || item.market === market)
         && (!hasPrice || item.estimatedPriceCents > 0)
-        && (!hasImage || !!item.imageUrl)
-        && (!compactQuery || terms.some(term => term.includes(compactQuery))
-          || tokens.every(token => terms.some(term => term.includes(token)))));
+        && (!hasImage || !!item.imageUrl));
+      if (compactQuery) {
+        const scored = matches.map(entry => ({ ...entry, score: matchScore(entry.terms, compactQuery, tokens) })).filter(entry => entry.score > 0);
+        // 有精确命中（包含 / 多词）时不混入按字符顺序的模糊结果
+        const strict = scored.filter(entry => entry.score >= 60);
+        matches = (strict.length ? strict : scored).sort((a, b) => b.score - a.score);
+      }
       if (fit) {
         matches = matches.map(entry => ({ ...entry, compatibility: catalogFitStatus(entry.item.specs, fit) }));
         if (!showConflicts) matches = matches.filter(entry => entry.compatibility !== 'conflict');
@@ -330,6 +490,28 @@ export function createCatalog(directory = '.runtime') {
       return { items: matches.slice(offset, offset + limit).map(({ item, compatibility }) =>
         compatibility ? { ...brief(item), compatibility } : brief(item)),
         total: matches.length, limit, offset, attribution: imported.attribution, attributions, performanceSources: performance.meta };
+    },
+    /** 输入框联想：按匹配度排，同分时有价、有性能数据、名称短的靠前 */
+    suggest(params) {
+      const query = (params.get('q') ?? '').trim();
+      if (query.length > 120) throw invalid('q 最长 120 个字符');
+      const category = (params.get('category') ?? '').trim().toUpperCase();
+      if (category && !categoryIds.has(category)) throw invalid('category 必须为标准槽位 ID');
+      const market = params.get('market') ?? 'all';
+      if (!['cn', 'global', 'all'].includes(market)) throw invalid('market 只能是 cn、global 或 all');
+      const limit = pagination(params.get('limit'), 8, 1, 20, 'limit');
+      const compact = normalize(query);
+      if (!compact) return { items: [] };
+      const tokens = queryTokens(query);
+      const ranked = [];
+      for (const entry of searchIndex) {
+        const { item } = entry;
+        if ((category && item.category !== category) || (market !== 'all' && item.market !== market)) continue;
+        const score = matchScore(entry.terms, compact, tokens);
+        if (score) ranked.push({ item, score: score + (item.estimatedPriceCents > 0 ? 3 : 0) + (item.performance?.gaming ? 2 : 0) });
+      }
+      ranked.sort((a, b) => b.score - a.score || a.item.name.length - b.item.name.length);
+      return { items: ranked.slice(0, limit).map(({ item, score }) => ({ ...brief(item), matchScore: score })) };
     },
     get(id) {
       const item = byId.get(id);

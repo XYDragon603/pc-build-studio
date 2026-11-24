@@ -109,6 +109,9 @@ export interface QuoteReport {
   cost: { projectSearchRequests: number; productPageRequests: number; cacheHits: number; estimatedGrossUsd: number | null };
 }
 
+/** 估算依据，由准到粗：ZOL 参考价、同型号、同芯片中位价、同规格中位价、同类粗估、ZOL 系列起价 */
+export type EstimateBasis = 'reference' | 'model' | 'chip-median' | 'spec-median' | 'class-median' | 'series-low';
+
 export interface CatalogItem {
   id: string;
   category: string;
@@ -127,9 +130,14 @@ export interface CatalogItem {
   /** ZOL 参考价，非实时 */
   referencePriceCents?: number | null;
   priceObservedAt?: string | null;
-  /** 估算依据：ZOL 参考价、同芯片中位价、同型号参考价、同规格中位价 */
   estimatedPriceCents?: number;
-  estimateBasis?: 'reference' | 'chip-median' | 'model' | 'spec-median';
+  estimateBasis?: EstimateBasis;
+  /** ZOL 系列产品的价格区间（最低档 ~ 最高档容量） */
+  priceRangeCents?: [number, number];
+  /** ZOL 参考价明显低于同规格其他型号，可能是涨价前的旧价（估算价已改用同规格中位价） */
+  possiblyStale?: boolean;
+  /** 联想搜索的匹配分 */
+  matchScore?: number;
   estimateSamples?: number;
   /** 参考价走势：最近一次变价与记录到的最低价 */
   priceTrend?: PriceTrend;
@@ -234,6 +242,7 @@ export const api = {
     call<RecommendResult>('/recommend', { method: 'POST', body, timeoutMs: 20000 }),
   catalogItem: (id: string) => call<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),
   catalogPage: (params: URLSearchParams, signal?: AbortSignal) => call<CatalogPage>(`/catalog?${params}`, { signal }),
+  catalogSuggest: (params: URLSearchParams, signal?: AbortSignal) => call<{ items: CatalogItem[] }>(`/catalog/suggest?${params}`, { signal }),
   catalog: (category: string, q: string, limit = 24, market: 'cn' | 'global' | 'all' = 'all') =>
     call<CatalogPage>(`/catalog?${new URLSearchParams({ category, q: q.trim().slice(0, 120), limit: String(limit), market })}`),
   // 实时检索会逐个读取商品页（每页最多 10 秒），给足时间

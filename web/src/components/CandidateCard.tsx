@@ -26,6 +26,8 @@ function estimateText({ basis, cents, samples, observedAt }: NonNullable<Candida
     'chip-median': `同芯片 ${samples} 款中位价`,
     model: '同型号 ZOL 参考价',
     'spec-median': `同规格 ${samples} 款中位价`,
+    'class-median': `同类 ${samples} 款粗估`,
+    'series-low': '同系列最低容量起价',
   }[basis];
   const time = basis === 'reference' && observedAt ? ` · ${formatObserved(observedAt)}` : '';
   return `${label} 约 ${formatYuan(cents)}${time}`;

@@ -4,6 +4,7 @@
 //   node scripts/import-zol.mjs --prices                    # 只重抓已抓过的列表页，刷新全部类目的参考价
 //   node scripts/import-zol.mjs --prices --category GPU
 //   node scripts/import-zol.mjs --category GPU --limit 300 --chips "RTX 50|RTX 40|RX 9|RX 7"
+//   node scripts/import-zol.mjs --category SSD --order hot --limit 150   # “热门”排序（/xxx/hot.html、hot_2.html），当前在售型号多
 //
 // 约束：
 // - 只访问 robots.txt 允许的列表页（/vga/N.html）和参数页（/xxxx/id/param.shtml）。
@@ -67,6 +68,8 @@ const { values: args } = parseArgs({ args: cli ? process.argv.slice(2) : [], opt
   // 默认排除服务器 / 专业卡，装机目录用不到
   exclude: { type: 'string', default: String.raw`Tesla|服务器|\bRTX A\d|RTX ?PRO|RTX \d{4} Ada|Quadro|\b[AH]\d{3}\b|Instinct|Radeon Pro` },
   'max-pages': { type: 'string', default: '20' },
+  // 列表排序：默认、热门（hot）、最新（new）；robots.txt 均允许
+  order: { type: 'string', default: 'default' },
   // 刷新参考价：不读缓存，重抓已抓过的列表页，只更新价格并记录历史
   prices: { type: 'boolean', default: false },
 } });
@@ -78,6 +81,14 @@ if (!config && !(pricesMode && category === 'ALL')) throw new Error(`暂只支�
 const limit = positive(args.limit, 'limit');
 const delayMs = Math.max(1000, positive(args.delay, 'delay'));
 const maxPages = positive(args['max-pages'], 'max-pages');
+const ORDERS = ['default', 'hot', 'new'];
+if (!ORDERS.includes(args.order)) throw new Error('--order 只能是 default、hot 或 new');
+
+/** 列表页地址与缓存名：默认 /slug/、/slug/2.html；热门 /slug/hot.html、/slug/hot_2.html */
+export function listPage(slug, page, order = 'default') {
+  if (order === 'default') return { url: page === 1 ? `${ORIGIN}/${slug}/` : `${ORIGIN}/${slug}/${page}.html`, cacheName: `list-${slug}-${page}.html` };
+  return { url: `${ORIGIN}/${slug}/${order}${page === 1 ? '' : '_' + page}.html`, cacheName: `list-${slug}-${order}-${page}.html` };
+}
 const chipFilter = args.chips ? new RegExp(args.chips, 'i') : null;
 const excludeFilter = args.exclude && category === 'GPU' ? new RegExp(args.exclude, 'i') : null;
 
@@ -148,9 +159,13 @@ export function parseList(html) {
     const block = m[2];
     const nameHtml = block.match(/<h3>\s*<a[^>]*>([\s\S]*?)<\/a>/)?.[1] ?? '';
     const name = text(nameHtml.replace(/<span[\s\S]*?<\/span>/g, ''));
-    const price = Number(block.match(/class="price-type">\s*([\d.]+)\s*</)?.[1]);
+    // 系列产品（固态硬盘常见）显示价格区间“359-1799”：记录的容量不一定是最低价那一档，单独存成区间
+    const priceText = block.match(/class="price-type">\s*([\d.]+(?:\s*-\s*[\d.]+)?)\s*</)?.[1] ?? '';
+    const [low, high] = priceText.split('-').map(v => Math.round(Number(v) * 100));
+    const price = high ? NaN : low / 100;
+    const priceRangeCents = high > 0 && low > 0 ? [low, high] : null;
     const image = block.match(/\.src="(https:\/\/[^"]+)"/)?.[1] ?? block.match(/<img[^>]*src="(https:\/\/[^"]+)"/)?.[1] ?? null;
-    if (name) items.push({ zolId: m[1], name, referencePriceCents: Number.isFinite(price) && price > 0 ? Math.round(price * 100) : null, imageUrl: image });
+    if (name) items.push({ zolId: m[1], name, referencePriceCents: Number.isFinite(price) && price > 0 ? Math.round(price * 100) : null, ...(priceRangeCents ? { priceRangeCents } : {}), imageUrl: image });
   }
   return items;
 }
@@ -427,6 +442,7 @@ function toRecord(listing, parsed) {
     imageSourceUrl: listing.imageUrl ? `${ORIGIN}/${config.slug}/index${listing.zolId}.shtml` : undefined,
     sourceUrl: paramUrl(listing.zolId),
     referencePriceCents: listing.referencePriceCents,
+    ...(listing.priceRangeCents ? { priceRangeCents: listing.priceRangeCents } : {}),
     priceObservedAt: listing.referencePriceCents ? listing.fetchedAt : null,
     dataSource: 'zol',
     rawParams: params,
@@ -437,11 +453,12 @@ function toRecord(listing, parsed) {
 
 const HISTORY_FILE = path.resolve('.runtime/zol-price-history.jsonl');
 
-/** 已抓过的列表页数（按缓存文件），刷新时只抓这些页 */
-async function cachedListPages(slug) {
+/** 已抓过的列表页数（按缓存文件，分排序方式），刷新时只抓这些页 */
+async function cachedListPages(slug, order) {
   let files = [];
   try { files = await readdir(CACHE_DIR); } catch { return 0; }
-  return Math.max(0, ...files.map(f => f.match(new RegExp(`^list-${slug}-(\\d+)\\.html$`))?.[1]).filter(Boolean).map(Number));
+  const infix = order === 'default' ? '' : order + '-';
+  return Math.max(0, ...files.map(f => f.match(new RegExp(`^list-${slug}-${infix}(\\d+)\\.html$`))?.[1]).filter(Boolean).map(Number));
 }
 
 async function refreshPrices() {
@@ -454,14 +471,14 @@ async function refreshPrices() {
   let stopped = null;
   outer: for (const cat of categories) {
     const { slug } = CATEGORIES[cat];
-    const pages = await cachedListPages(slug);
-    const r = report[cat] = { pages, seen: 0, changed: 0, notSeen: 0 };
+    const r = report[cat] = { pages: 0, seen: 0, changed: 0, notSeen: 0 };
     const seen = new Set();
-    for (let page = 1; page <= pages; page++) {
-      const url = page === 1 ? `${ORIGIN}/${slug}/` : `${ORIGIN}/${slug}/${page}.html`;
+    for (const order of ORDERS) for (let page = 1, pages = await cachedListPages(slug, order); page <= pages; page++) {
+      r.pages++;
+      const { url, cacheName } = listPage(slug, page, order);
       let result;
       try {
-        result = await fetchPage(url, `list-${slug}-${page}.html`, { refresh: true });
+        result = await fetchPage(url, cacheName, { refresh: true });
       } catch (error) {
         if (!(error instanceof NetworkError || error instanceof Blocked)) throw error;
         stopped = error.message;
@@ -473,6 +490,7 @@ async function refreshPrices() {
         if (!item || seen.has(item.id)) continue;
         seen.add(item.id);
         r.seen++;
+        if (listing.priceRangeCents) { item.priceRangeCents = listing.priceRangeCents; item.priceObservedAt = result.fetchedAt; }
         if (listing.referencePriceCents == null) continue;
         if (item.referencePriceCents !== listing.referencePriceCents) r.changed++;
         history.push({ id: item.id, cents: listing.referencePriceCents, previousCents: item.referencePriceCents ?? null, at: result.fetchedAt });
@@ -502,19 +520,19 @@ async function main() {
 
   const queue = [];
   for (let page = 1; page <= maxPages && queue.length < limit; page++) {
-    const url = page === 1 ? `${ORIGIN}/${config.slug}/` : `${ORIGIN}/${config.slug}/${page}.html`;
-    let listPage;
+    const { url, cacheName } = listPage(config.slug, page, args.order);
+    let listResult;
     try {
-      listPage = await fetchPage(url, `list-${config.slug}-${page}.html`);
+      listResult = await fetchPage(url, cacheName);
     } catch (error) {
       if (!(error instanceof NetworkError)) throw error;
       console.error(error.message);
       break;
     }
-    const { html } = listPage;
+    const { html } = listResult;
     if (!html) break;
     report.listPages++;
-    const listings = parseList(html).map(l => ({ ...l, fetchedAt: listPage.fetchedAt }));
+    const listings = parseList(html).map(l => ({ ...l, fetchedAt: listResult.fetchedAt }));
     if (!listings.length) break;
     for (const listing of listings) {
       if (queue.length >= limit) break;
