@@ -1,6 +1,6 @@
 import { SLOTS } from '../domain/slots';
 import type { Build, CustomPart, Part, SlotId } from '../domain/types';
-import type { ApiBuild, ApiBuildInput, ApiPart, ApiSlot, ApiTemplate } from './client';
+import type { ApiBuild, ApiBuildInput, ApiPart, ApiSlot } from './client';
 
 export const SLOT_TO_API: Record<SlotId, string> = {
   cpu: 'CPU', gpu: 'GPU', board: 'MOTHERBOARD', ram: 'RAM', ssd: 'SSD', psu: 'PSU', case: 'CASE', cooler: 'COOLER',
@@ -57,7 +57,7 @@ export function toApiInput(b: Build): ApiBuildInput {
   return { name: b.name.trim() || '未命名方案', budgetCents: b.budgetCents, scenarios: [...b.scenarios], slots };
 }
 
-export function fromApi(a: ApiBuild | ApiTemplate): Build {
+export function fromApi(a: ApiBuild | ApiBuildInput): Build {
   const slots = Object.fromEntries(SLOTS.map(({ id }) => [id, { part: null, locked: false }])) as Build['slots'];
   const custom: CustomPart[] = [];
   for (const s of a.slots) {

@@ -1,15 +1,20 @@
-import { Briefcase, Gamepad2, Loader2, RotateCcw, Sparkles, VolumeX } from 'lucide-react';
+import { FileClock, Gamepad2, Loader2, Sparkles, VolumeX, Wallet } from 'lucide-react';
 import { useState } from 'react';
 import { api, type PlanResult } from '../api/client';
 import { formatYuan } from '../domain/money';
 import type { Build } from '../domain/types';
 import { PlanCard } from './PlanCard';
 
-const PRESETS = [2000, 3000, 4000, 5000, 6000, 8000, 10000, 15000];
 const MIN = 2000;
 const MAX = 30000;
 
 export type Purpose = 'office' | 'game';
+
+export interface PlanGeneration {
+  budgetCents: number;
+  scenarios: string[];
+  plans: PlanResult[];
+}
 
 interface Props {
   budgetYuan: number;
@@ -18,9 +23,9 @@ interface Props {
   onBudget: (yuan: number) => void;
   onPurpose: (p: Purpose) => void;
   onQuiet: (q: boolean) => void;
-  plans: PlanResult[] | null;
-  onPlans: (plans: PlanResult[] | null) => void;
-  onChoose: (plan: PlanResult) => void;
+  generation: PlanGeneration | null;
+  onPlans: (generation: PlanGeneration) => void;
+  onChoose: (plan: PlanResult, generation: PlanGeneration) => void;
   draft: Build | null;
   onResume: () => void;
 }
@@ -29,23 +34,34 @@ export function scenariosOf(purpose: Purpose, quiet: boolean): string[] {
   return [purpose === 'office' ? 'office' : '2k', ...(quiet ? ['quiet'] : [])];
 }
 
-export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet, plans, onPlans, onChoose, draft, onResume }: Props) {
+export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet, generation, onPlans, onChoose, draft, onResume }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState(String(budgetYuan));
 
-  const commitText = (value: string) => {
+  const textBudget = (value: string) => {
     const n = Math.round(Number(value.replace(/[^\d]/g, '')));
-    const v = Number.isFinite(n) && n > 0 ? Math.min(MAX, Math.max(MIN, n)) : budgetYuan;
+    return Number.isFinite(n) && n > 0 ? Math.min(MAX, Math.max(MIN, n)) : budgetYuan;
+  };
+  const commitText = (value: string) => {
+    const v = textBudget(value);
     onBudget(v);
     setText(String(v));
+    return v;
   };
 
+  const scenarios = scenariosOf(purpose, quiet);
+  const current = generation?.budgetCents === textBudget(text) * 100 && generation.scenarios.join(',') === scenarios.join(',') ? generation : null;
+  const fullPlans = current?.plans.filter(p => p.picks.length + Number(p.igpu) + Number(p.stockCooler) === 8) ?? [];
+  const lowest = fullPlans.length ? Math.min(...fullPlans.map(p => p.totalCents)) : null;
+
   const generate = async () => {
+    const budgetCents = commitText(text) * 100;
     setLoading(true);
     setError(null);
     try {
-      onPlans(await api.plans({ budgetCents: budgetYuan * 100, scenarios: scenariosOf(purpose, quiet) }));
+      const plans = await api.plans({ budgetCents, scenarios });
+      onPlans({ budgetCents, scenarios, plans });
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成方案失败');
     } finally {
@@ -54,87 +70,57 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
   };
 
   return (
-    <div className="nx-home">
-      <section className="nx-ask">
-        <div className="nx-ask-row">
-          <div className="nx-ask-budget">
-            <label htmlFor="nx-budget">预算多少？</label>
-            <div className="nx-money">
-              <span>¥</span>
-              <input
-                id="nx-budget"
-                inputMode="numeric"
-                value={text}
-                onChange={e => setText(e.target.value.replace(/[^\d]/g, ''))}
-                onBlur={e => commitText(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { commitText((e.target as HTMLInputElement).value); } }}
-              />
-            </div>
-            <input
-              type="range"
-              className="nx-range"
-              min={MIN}
-              max={MAX}
-              step={500}
-              value={budgetYuan}
-              onChange={e => { onBudget(Number(e.target.value)); setText(e.target.value); }}
-              aria-label="预算"
-            />
-            <div className="nx-presets">
-              {PRESETS.map(p => (
-                <button key={p} type="button" className={`nx-chip${p === budgetYuan ? ' on' : ''}`} onClick={() => { onBudget(p); setText(String(p)); }}>
-                  {p >= 10000 ? `${p / 10000} 万` : p}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="nx-ask-purpose">
-            <span className="nx-label">主要用来</span>
-            <div className="nx-purposes">
-              <button type="button" className={`nx-purpose${purpose === 'game' ? ' on' : ''}`} onClick={() => onPurpose('game')}>
-                <Gamepad2 /> <strong>玩游戏</strong><small>按 2K 游戏性能挑显卡</small>
-              </button>
-              <button type="button" className={`nx-purpose${purpose === 'office' ? ' on' : ''}`} onClick={() => onPurpose('office')}>
-                <Briefcase /> <strong>办公学习</strong><small>不配独立显卡，省钱</small>
-              </button>
-            </div>
-            <label className="nx-toggle">
-              <input type="checkbox" checked={quiet} onChange={e => onQuiet(e.target.checked)} />
-              <VolumeX size={16} /> 安静优先（散热、电源多花一点）
-            </label>
-          </div>
+    <div className="nx-page nx-home">
+      <header className="nx-page-head">
+        <h1>方案推荐</h1>
+        <p className="nx-muted">按预算、使用场景和偏好生成装机方案</p>
+      </header>
+      <form className="nx-panel nx-ask" onSubmit={e => { e.preventDefault(); void generate(); }}>
+        <div className="nx-ask-field">
+          <Wallet size={22} aria-hidden />
+          <label htmlFor="nx-budget">
+            <span>整机预算</span>
+            <span className="nx-money">¥ <input id="nx-budget" inputMode="numeric" value={text} onChange={e => setText(e.target.value.replace(/[^\d]/g, ''))} onBlur={e => commitText(e.target.value)} /></span>
+          </label>
         </div>
-
+        <div className="nx-ask-field">
+          <Gamepad2 size={22} aria-hidden />
+          <label htmlFor="nx-purpose">
+            <span>使用场景</span>
+            <select id="nx-purpose" value={purpose} onChange={e => onPurpose(e.target.value === 'office' ? 'office' : 'game')}>
+              <option value="game">2K 游戏</option>
+              <option value="office">办公学习</option>
+            </select>
+          </label>
+        </div>
+        <label className="nx-toggle nx-quiet">
+          <VolumeX size={18} aria-hidden /> 安静优先
+          <input type="checkbox" role="switch" checked={quiet} onChange={e => onQuiet(e.target.checked)} />
+        </label>
         <div className="nx-ask-actions">
-          <button type="button" className="nx-btn nx-btn-primary nx-btn-lg" onClick={generate} disabled={loading}>
-            {loading ? <Loader2 className="spin" /> : <Sparkles />} {plans ? '重新出方案' : '出方案'}
+          {draft && <button type="button" className="nx-btn nx-btn-outline" onClick={onResume} title={draft.name}><FileClock size={17} /> 继续草稿</button>}
+          <button type="submit" className="nx-btn nx-btn-primary" disabled={loading}>
+            {loading ? <Loader2 className="spin" /> : <Sparkles />} 生成方案
           </button>
-          {draft && (
-            <button type="button" className="nx-btn nx-btn-ghost" onClick={onResume}>
-              <RotateCcw size={16} /> 继续上次的方案（{draft.name || '未命名'}）
-            </button>
-          )}
         </div>
-        {error && <p className="nx-error" role="alert">{error}</p>}
-      </section>
+      </form>
+      {error && <p className="nx-error" role="alert">{error}</p>}
 
       <section className="nx-plans">
-        {plans ? (
+        {current && !loading ? (
           <>
             <div className="nx-plans-head">
-              <h2>给 {formatYuan(budgetYuan * 100)} 的 {plans.length} 套方案</h2>
-              <p>价格为中关村在线参考价估算，通常略高于电商实际售价；选中后可以逐件替换、改成实付价。</p>
+              <h2>方案对比</h2>
+              {lowest !== null && lowest > current.budgetCents && <p className="nx-warning" role="status">本次最低的完整方案约 {formatYuan(lowest)}，超预算 {formatYuan(lowest - current.budgetCents)}。</p>}
             </div>
-            <div className={`nx-plan-grid n${plans.length}`}>
-              {plans.map(p => <PlanCard key={p.id} plan={p} budgetCents={budgetYuan * 100} scenarios={scenariosOf(purpose, quiet)} onChoose={() => onChoose(p)} />)}
+            <div className={`nx-plan-grid n${current.plans.length}`}>
+              {current.plans.map(p => <PlanCard key={p.id} plan={p} budgetCents={current.budgetCents} scenarios={current.scenarios} onChoose={() => onChoose(p, current)} />)}
             </div>
           </>
         ) : (
           <div className="nx-plans-empty">
             {loading ? <Loader2 className="spin" size={36} /> : <Sparkles size={36} />}
-            <strong>{loading ? '正在挑配件…' : '填好预算和用途，点“出方案”'}</strong>
-            <span className="nx-muted">会给出省钱版、推荐版、进阶版三套，选一套后还能逐件调整。</span>
+            <strong>{loading ? '正在挑配件…' : generation ? '预算或用途已变更，请重新出方案' : '填好预算和用途，点“出方案”'}</strong>
           </div>
         )}
       </section>

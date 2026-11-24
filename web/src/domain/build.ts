@@ -6,7 +6,7 @@ export type BuildAction =
   | { type: 'setBudget'; cents: number }
   | { type: 'toggleScenario'; key: string }
   | { type: 'rename'; name: string }
-  | { type: 'addCandidate'; candidate: Candidate; priceCents: number; priceSource: Part['priceSource']; note?: string }
+  | { type: 'addCandidate'; candidate: Candidate; priceCents: number | null; priceSource: Part['priceSource']; note?: string }
   | { type: 'removePart'; slot: SlotId }
   | { type: 'toggleLock'; slot: SlotId }
   | { type: 'setPartPrice'; slot: SlotId; priceCents: number | null }
@@ -41,7 +41,7 @@ export function buildReducer(b: Build, a: BuildAction): Build {
     case 'rename':
       return touch({ ...b, name: a.name });
     case 'addCandidate':
-      // 调用方只在价格已确认（演示确认、后端校验通过或用户手动核实）后才能加入
+      // 未知价格用 null 记录，等待用户填价。
       return updateSlot(b, a.candidate.slot, s =>
         s.locked ? s : { ...s, part: partFromCandidate(a.candidate, a.priceCents, a.priceSource, a.note) });
     case 'removePart':

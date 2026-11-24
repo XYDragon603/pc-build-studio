@@ -43,8 +43,8 @@ export function buildMarkdown(b: Build, demo: boolean): string {
   return lines.filter((l, i, arr) => !(l === '' && arr[i - 1] === '')).join('\n');
 }
 
-export function downloadText(filename: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+export function downloadText(filename: string, text: string, type = 'text/markdown;charset=utf-8') {
+  const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;

@@ -42,6 +42,17 @@ export interface ApiBuildInput {
   slots: ApiSlot[];
 }
 
+export interface ApiDraft {
+  build: ApiBuildInput;
+  serverId?: string;
+  version?: number;
+}
+
+export interface BuildBackup {
+  format: 1;
+  builds: Omit<ApiBuild, 'totals'>[];
+}
+
 export interface ApiTotals {
   totalCents: number;
   remainingCents: number;
@@ -110,13 +121,15 @@ export interface CatalogItem {
   imageUrl: string | null;
   sourceUrl: string;
   dataSource?: 'buildcores' | 'zol';
+  market?: 'cn' | 'global';
+  compatibility?: 'pass' | 'conflict' | 'unknown';
   zolId?: string;
   /** ZOL 参考价，非实时 */
   referencePriceCents?: number | null;
   priceObservedAt?: string | null;
-  /** 估算价：reference = ZOL 参考价；chip-median = 同芯片同显存中位价 */
+  /** 估算依据：ZOL 参考价、同芯片中位价、同型号参考价、同规格中位价 */
   estimatedPriceCents?: number;
-  estimateBasis?: 'reference' | 'chip-median';
+  estimateBasis?: 'reference' | 'chip-median' | 'model' | 'spec-median';
   estimateSamples?: number;
   /** 参考价走势：最近一次变价与记录到的最低价 */
   priceTrend?: PriceTrend;
@@ -178,14 +191,15 @@ export interface Health {
   quotes: { liveConfigured: boolean; modes: QuoteMode[]; categories: string[]; jdUnionConfigured?: boolean };
 }
 
-async function call<T>(path: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<T> {
+async function call<T>(path: string, init: { method?: string; body?: unknown; timeoutMs?: number; keepalive?: boolean; signal?: AbortSignal } = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(BASE + path, {
       method: init.method ?? 'GET',
       headers: init.body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      signal: AbortSignal.timeout(init.timeoutMs ?? 15000),
+      keepalive: init.keepalive,
+      signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(init.timeoutMs ?? 15000)]) : AbortSignal.timeout(init.timeoutMs ?? 15000),
     });
   } catch (e) {
     const timeout = e instanceof DOMException && e.name === 'TimeoutError';
@@ -205,6 +219,10 @@ export const api = {
   health: () => call<Health>('/health', { timeoutMs: 4000 }),
   template: () => call<ApiTemplate>('/templates/demo'),
   listBuilds: () => call<{ items: ApiBuildSummary[] }>('/builds').then(r => r.items),
+  loadDraft: () => call<{ draft: ApiDraft | null }>('/draft').then(r => r.draft),
+  saveDraft: (input: ApiDraft) => call<void>('/draft', { method: 'PUT', body: input, keepalive: true }),
+  backupBuilds: () => call<BuildBackup>('/builds/backup'),
+  restoreBuilds: (backup: unknown) => call<{ restored: number; skipped: number }>('/builds/backup', { method: 'POST', body: backup }),
   getBuild: (id: string) => call<ApiBuild>(`/builds/${id}`),
   createBuild: (input: ApiBuildInput) => call<ApiBuild>('/builds', { method: 'POST', body: input }),
   updateBuild: (id: string, input: ApiBuildInput & { version: number }) => call<ApiBuild>(`/builds/${id}`, { method: 'PUT', body: input }),
@@ -215,8 +233,9 @@ export const api = {
   recommend: (body: { budgetCents: number; scenarios: string[]; locked: Record<string, { priceCents: number; specs: object }> }) =>
     call<RecommendResult>('/recommend', { method: 'POST', body, timeoutMs: 20000 }),
   catalogItem: (id: string) => call<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),
-  catalog: (category: string, q: string, limit = 24) =>
-    call<CatalogPage>(`/catalog?${new URLSearchParams({ category, q: q.trim().slice(0, 120), limit: String(limit) })}`),
+  catalogPage: (params: URLSearchParams, signal?: AbortSignal) => call<CatalogPage>(`/catalog?${params}`, { signal }),
+  catalog: (category: string, q: string, limit = 24, market: 'cn' | 'global' | 'all' = 'all') =>
+    call<CatalogPage>(`/catalog?${new URLSearchParams({ category, q: q.trim().slice(0, 120), limit: String(limit), market })}`),
   // 实时检索会逐个读取商品页（每页最多 10 秒），给足时间
   searchQuotes: (category: 'CPU' | 'GPU', query: string, mode: QuoteMode) =>
     call<QuoteReport>('/quotes/search', { method: 'POST', body: { category, query, mode }, timeoutMs: mode === 'live' ? 150000 : 15000 }),

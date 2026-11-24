@@ -1,129 +1,141 @@
-import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronDown, Download, FolderOpen, Loader2, Repeat, Save, Trash2, XCircle } from 'lucide-react';
-import { useMemo, useState, type Dispatch } from 'react';
-import type { BuildAction } from '../domain/build';
-import { totals } from '../domain/build';
+import { AlertTriangle, BadgeCheck, CheckCircle2, CircleDollarSign, Download, Gamepad2, Loader2, Lock, Pencil, PieChart, Repeat, Save, Trash2, VolumeX, Wallet, XCircle } from 'lucide-react';
+import { useMemo, type Dispatch, type ReactNode } from 'react';
+import { SLOT_ICONS } from '../components/icons';
+import { totals, type BuildAction } from '../domain/build';
+import { estimatePower, type Check } from '../domain/compat';
 import { formatYuan } from '../domain/money';
-import { buildChecks, compatSummary, gpuTier, INTEGRATED_GPU_NAME, isIntegratedGpu, STOCK_COOLER_NAME } from '../domain/plan';
+import { buildChecks, compatSummary, INTEGRATED_GPU_NAME, STOCK_COOLER_NAME } from '../domain/plan';
 import { SLOTS } from '../domain/slots';
 import type { Build, SlotId } from '../domain/types';
-import { useCatalogItems } from './data';
+import { ESTIMATE_LABELS, useCatalogItems } from './data';
 import { Thumb } from './Thumb';
 
 interface Props {
   build: Build;
   dispatch: Dispatch<BuildAction>;
-  onBack: () => void;
+  activeSlot: SlotId | null;
+  picker: ReactNode;
   onPick: (slot: SlotId) => void;
+  onClosePicker: () => void;
   onEditPrice: (slot: SlotId) => void;
   onSave: () => void;
   saving: boolean;
   saveText: string;
+  draftStatus: string;
   onExport: () => void;
-  onOpenPlans: () => void;
 }
 
-export function Editor({ build, dispatch, onBack, onPick, onEditPrice, onSave, saving, saveText, onExport, onOpenPlans }: Props) {
+const CHECK_ICONS = { ok: CheckCircle2, warn: AlertTriangle, error: XCircle };
+
+function CheckRow({ check }: { check: Check }) {
+  const Icon = CHECK_ICONS[check.level];
+  return (
+    <li className={check.level}>
+      <Icon size={17} aria-hidden />
+      <div><strong>{check.label}</strong><p>{check.detail}</p></div>
+    </li>
+  );
+}
+
+export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePicker, onEditPrice, onSave, saving, saveText, draftStatus, onExport }: Props) {
   const t = totals(build);
   const checks = useMemo(() => buildChecks(build), [build]);
   const summary = compatSummary(checks);
-  const [showChecks, setShowChecks] = useState(false);
+  const bios = checks.find(c => c.id === 'bios');
   const items = useCatalogItems(SLOTS.map(s => build.slots[s.id].part?.catalogId));
+  const power = estimatePower(build);
   const over = t.remainingCents < 0;
-  const gpuItem = build.slots.gpu.part?.catalogId ? items[build.slots.gpu.part.catalogId] : null;
-  const StatusIcon = summary.level === 'ok' ? CheckCircle2 : summary.level === 'warn' ? AlertTriangle : XCircle;
+  const status = summary.level === 'ok' && bios ? 'warn' : summary.level;
+  const StatusIcon = CHECK_ICONS[status];
 
   return (
-    <div className="nx-editor">
-      <div className="nx-editor-main">
-        <div className="nx-editor-head">
-          <button type="button" className="nx-btn nx-btn-ghost" onClick={onBack}><ArrowLeft size={16} /> 重新出方案</button>
-          <input className="nx-name" value={build.name} onChange={e => dispatch({ type: 'rename', name: e.target.value })} aria-label="方案名称" maxLength={40} />
+    <div className="nx-page nx-editor">
+      <header className="nx-page-head nx-editor-head">
+        <div className="nx-name-field">
+          <input className="nx-name" value={build.name} onChange={e => dispatch({ type: 'rename', name: e.target.value })} aria-label="方案名称" size={Math.min(Math.max(build.name.length, 7), 25)} maxLength={40} />
+          <Pencil size={17} aria-hidden />
         </div>
+        {build.scenarios.includes('2k') && <span className="nx-tag"><Gamepad2 size={17} />2K 游戏</span>}
+        {build.scenarios.includes('office') && <span className="nx-tag">办公学习</span>}
+        {build.scenarios.includes('quiet') && <span className="nx-tag"><VolumeX size={17} />安静优先</span>}
+        <span className="nx-editor-state" role="status">{draftStatus || saveText}</span>
+      </header>
 
-        <ul className="nx-rows">
-          {SLOTS.map(({ id, label }) => {
-            const part = build.slots[id].part;
-            const item = part?.catalogId ? items[part.catalogId] : null;
-            const placeholder = part && (part.name === INTEGRATED_GPU_NAME || part.name === STOCK_COOLER_NAME);
-            const perf = item?.performance;
-            return (
-              <li key={id} className={`nx-row${part ? '' : ' empty'}`}>
-                <Thumb src={item?.imageUrl} slot={id} size="md" />
-                <div className="nx-row-body">
-                  <span className="nx-slot">{label}</span>
-                  {part ? (
-                    <>
-                      <strong className="nx-row-name" title={part.name}>{part.name}</strong>
-                      <span className="nx-muted">{item?.summary || part.spec}</span>
-                      {perf?.gaming && <span className="nx-perf">{id === 'gpu' ? `2K 游戏性能 ${perf.gaming.index}%` : `游戏性能 ${perf.gaming.index}%（1080p）`}{perf.gaming.label ? ` · ${perf.gaming.label}` : ''}</span>}
-                    </>
-                  ) : (
-                    <span className="nx-muted">还没选</span>
-                  )}
-                </div>
-                {part && !placeholder && (
-                  <button type="button" className="nx-row-price" onClick={() => onEditPrice(id)} title="点击修改为实付价">
-                    {part.priceCents == null ? '填价格' : part.priceSource === 'estimate' ? `约 ${formatYuan(part.priceCents)}` : formatYuan(part.priceCents)}
-                    <small>{part.priceSource === 'estimate' ? '参考价 · 点我改' : '已确认'}</small>
-                  </button>
-                )}
-                {placeholder && <span className="nx-row-price static">—<small>{part!.spec}</small></span>}
-                <div className="nx-row-actions">
-                  <button type="button" className="nx-btn nx-btn-outline" onClick={() => onPick(id)}>
-                    <Repeat size={16} /> {part ? '换一个' : '选一个'}
-                  </button>
-                  {part && (
-                    <button type="button" className="nx-icon-btn" aria-label={`移除${label}`} title="移除" onClick={() => dispatch({ type: 'removePart', slot: id })}>
-                      <Trash2 size={16} />
-                    </button>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+      <div className="nx-editor-content">
+        <section className="nx-panel nx-build-panel" aria-labelledby="nx-build-heading">
+          <header className="nx-section-head"><h2 id="nx-build-heading">配置清单</h2><span className="nx-muted">已选 {t.filled} / {t.slotCount} 项</span></header>
+          <div className="nx-table-scroll">
+            <table className="nx-build-table" aria-label="当前方案配件">
+              <thead><tr><th scope="col">配件</th><th scope="col">产品与规格</th><th scope="col">参考价</th><th scope="col">实付价</th><th scope="col"><span className="sr-only">操作</span></th></tr></thead>
+              <tbody>
+                {SLOTS.map(({ id, label }) => {
+                  const { part, locked } = build.slots[id];
+                  const item = part?.catalogId ? items[part.catalogId] : null;
+                  const placeholder = part?.name === INTEGRATED_GPU_NAME || part?.name === STOCK_COOLER_NAME;
+                  const reference = part?.priceSource === 'estimate' || part?.priceSource === 'demo' ? part.priceCents : item?.estimatedPriceCents;
+                  const actual = part?.priceSource === 'manual' ? part.priceCents : null;
+                  const basis = part?.priceSource === 'demo' ? '演示价' : item?.estimateBasis && item.estimatedPriceCents === reference
+                    ? ESTIMATE_LABELS[item.estimateBasis] : '保存时的估算价';
+                  const Icon = SLOT_ICONS[id];
+                  return (
+                    <tr key={id} className={activeSlot === id ? 'is-active' : ''}>
+                      <th scope="row"><span className="nx-slot-caption"><Icon size={19} aria-hidden />{label}</span></th>
+                      <td>
+                        <button type="button" className="nx-row-product" onClick={() => onPick(id)} disabled={locked} aria-label={part ? `更换${label}：${part.name}` : `选择${label}`}>
+                          <Thumb src={item?.imageUrl} slot={id} size="md" />
+                          <span className="nx-row-body">
+                            <strong title={part?.name}>{part?.name ?? '选择配件'}</strong>
+                            {part && <span title={item?.summary || part.spec}>{item?.summary || part.spec}</span>}
+                          </span>
+                        </button>
+                      </td>
+                      <td className="nx-amount" title={reference == null || placeholder ? undefined : basis}>{reference == null || placeholder ? '—' : formatYuan(reference)}</td>
+                      <td className="nx-amount">
+                        {part && !placeholder
+                          ? <button type="button" className={`nx-price-edit${actual == null ? ' is-unset' : ''}`} onClick={() => onEditPrice(id)} disabled={locked} aria-label={`编辑${label}实付价`}>{actual == null ? '填写' : formatYuan(actual)}</button>
+                          : '—'}
+                      </td>
+                      <td>
+                        <span className="nx-row-actions">
+                          {locked
+                            ? <button type="button" className="nx-icon-btn" title="解锁" aria-label={`解锁${label}`} onClick={() => dispatch({ type: 'toggleLock', slot: id })}><Lock size={15} /></button>
+                            : <button type="button" className="nx-icon-btn" title={part ? '更换' : '选择'} aria-label={`${part ? '更换' : '选择'}${label}`} onClick={() => onPick(id)}><Repeat size={15} /></button>}
+                          {part && !locked && <button type="button" className="nx-icon-btn nx-remove" aria-label={`移除${label}`} title="移除" onClick={() => dispatch({ type: 'removePart', slot: id })}><Trash2 size={15} /></button>}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {build.custom.map(part => <tr key={part.id}><th scope="row"><span className="nx-slot-caption">自定义</span></th><td><strong>{part.name}</strong><div className="nx-muted small">{part.spec}</div></td><td>—</td><td className="nx-amount">{part.priceCents == null ? '—' : formatYuan(part.priceCents)}</td><td><button type="button" className="nx-icon-btn nx-remove" aria-label={`移除${part.name}`} onClick={() => dispatch({ type: 'removeCustom', id: part.id })}><Trash2 size={15} /></button></td></tr>)}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {activeSlot ? picker : (
+          <aside className="nx-panel nx-build-inspector">
+            <header className="nx-section-head"><h2><BadgeCheck size={22} />兼容性检查</h2></header>
+            <div className="nx-inspector-scroll">
+              <div className={`nx-check-summary nx-tag ${status}`}><StatusIcon size={17} />{summary.level === 'ok' && bios ? bios.label : summary.text}</div>
+              <ul className="nx-check-list">{checks.map(check => <CheckRow key={check.id} check={check} />)}</ul>
+              <div className="nx-power"><span>预估满载功耗</span><strong>{power.estimatedLoadWatts == null ? '待补充规格' : `${power.estimatedLoadWatts} W`}</strong></div>
+            </div>
+          </aside>
+        )}
       </div>
 
-      <aside className="nx-side">
-        <div className="nx-total">
-          <span className="nx-muted">合计{t.estimateCount ? `（含 ${t.estimateCount} 件参考价）` : ''}</span>
-          <strong>{formatYuan(t.totalCents)}</strong>
-          <div className={`nx-bar${over ? ' over' : ''}`}><span style={{ width: `${Math.min(1, t.ratio) * 100}%` }} /></div>
-          <div className="nx-total-foot">
-            <span>预算 {formatYuan(build.budgetCents)}</span>
-            <span className={over ? 'nx-over' : 'nx-ok'}>{over ? `超出 ${formatYuan(-t.remainingCents)}` : `剩余 ${formatYuan(t.remainingCents)}`}</span>
-          </div>
-          {t.missing.length > 0 && <p className="nx-muted small">还差 {t.missing.length} 件：{t.missing.map(id => SLOTS.find(s => s.id === id)!.label).join('、')}</p>}
+      <footer className="nx-editor-footer">
+        <div className="nx-footer-metrics">
+          <span><Wallet size={18} />预算 <strong>{formatYuan(build.budgetCents)}</strong></span>
+          <span title={`包含 ${t.estimateCount} 项估算价，${t.unknownPriceCount} 项待填价`}><CircleDollarSign size={18} />预计总价 <strong>{formatYuan(t.totalCents)}</strong></span>
+          <span><PieChart size={18} />{over ? '超出预算' : '剩余预算'} <strong className={over ? 'nx-over' : ''}>{formatYuan(Math.abs(t.remainingCents))}</strong></span>
         </div>
-
-        <div className="nx-level">
-          <span className="nx-label">大致档次</span>
-          <strong>{gpuTier(gpuItem?.performance?.gaming?.index, isIntegratedGpu(build.slots.gpu.part))}</strong>
+        {status !== 'ok' && <button type="button" className={`nx-tag ${status}`} title={summary.text} onClick={onClosePicker}><StatusIcon size={17} />{summary.level === 'ok' && bios ? bios.label : '兼容性待核对'}</button>}
+        <div className="nx-footer-actions">
+          <button type="button" className="nx-btn nx-btn-outline" onClick={onExport}><Download size={17} />导出清单</button>
+          <button type="button" className="nx-btn nx-btn-primary" onClick={onSave} disabled={saving}>{saving ? <Loader2 className="spin" /> : <Save size={17} />}保存方案</button>
         </div>
-
-        <div className={`nx-compat-box ${summary.level}`}>
-          <button type="button" onClick={() => setShowChecks(v => !v)}>
-            <StatusIcon size={18} /> <span>{summary.text}</span> <ChevronDown size={16} className={showChecks ? 'rot' : ''} />
-          </button>
-          {showChecks && (
-            <ul>
-              {checks.map(c => <li key={c.id} className={c.level}><strong>{c.label}</strong><span>{c.detail}</span></li>)}
-            </ul>
-          )}
-        </div>
-
-        <div className="nx-side-actions">
-          <button type="button" className="nx-btn nx-btn-primary nx-btn-block" onClick={onSave} disabled={saving}>
-            {saving ? <Loader2 size={16} className="spin" /> : <Save size={16} />} 保存方案
-          </button>
-          <p className="nx-muted small center">{saveText}</p>
-          <div className="nx-two">
-            <button type="button" className="nx-btn nx-btn-ghost" onClick={onExport}><Download size={16} /> 导出清单</button>
-            <button type="button" className="nx-btn nx-btn-ghost" onClick={onOpenPlans}><FolderOpen size={16} /> 我的方案</button>
-          </div>
-        </div>
-        {t.estimateCount > 0 && <p className="nx-muted small">“约”表示中关村在线参考价，通常略高于电商实际售价。下单前点价格改成实付价，合计会自动更新。</p>}
-      </aside>
+      </footer>
     </div>
   );
 }

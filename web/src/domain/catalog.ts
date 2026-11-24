@@ -53,6 +53,9 @@ export function catalogSpecs(slot: SlotId, specs: CatalogItem['specs']): PartSpe
 
 export function catalogToCandidate(item: CatalogItem, slot: SlotId): Candidate {
   const url = /^https:\/\//.test(item.sourceUrl) ? item.sourceUrl : null;
+  const estimate: Candidate['estimate'] = item.estimatedPriceCents && item.estimateBasis
+    ? { cents: item.estimatedPriceCents, basis: item.estimateBasis, samples: item.estimateSamples ?? 1, observedAt: item.priceObservedAt ?? null }
+    : undefined;
   return {
     id: `catalog:${item.id}`,
     slot,
@@ -67,9 +70,7 @@ export function catalogToCandidate(item: CatalogItem, slot: SlotId): Candidate {
     priceCents: null,
     referenceCents: null,
     catalogId: item.id,
-    estimate: item.estimatedPriceCents && item.estimateBasis
-      ? { cents: item.estimatedPriceCents, basis: item.estimateBasis, samples: item.estimateSamples ?? 1, observedAt: item.priceObservedAt ?? null }
-      : undefined,
+    estimate,
     priceTrend: item.priceTrend,
     performance: item.performance,
     state: 'missing',

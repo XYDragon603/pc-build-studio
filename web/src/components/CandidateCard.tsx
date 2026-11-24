@@ -20,6 +20,17 @@ interface Props {
 export const formatObserved = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 
+function estimateText({ basis, cents, samples, observedAt }: NonNullable<Candidate['estimate']>) {
+  const label = {
+    reference: 'ZOL 参考价',
+    'chip-median': `同芯片 ${samples} 款中位价`,
+    model: '同型号 ZOL 参考价',
+    'spec-median': `同规格 ${samples} 款中位价`,
+  }[basis];
+  const time = basis === 'reference' && observedAt ? ` · ${formatObserved(observedAt)}` : '';
+  return `${label} 约 ${formatYuan(cents)}${time}`;
+}
+
 function sourceLine(c: Candidate) {
   if (c.source === 'demo') return `${c.storeLabel} · 演示报价`;
   if (c.source === 'catalog') return `${c.storeLabel} · 型号参数，无报价`;
@@ -88,11 +99,7 @@ export function CandidateCard({ candidate: c, verifiedCents, inBuild, slotLocked
           {confirmed ? formatYuan(price) : c.state === 'review' ? '待核实' : '价格未获取'}
         </p>
         {!confirmed && c.estimate && (
-          <p className="estimate-line">
-            {c.estimate.basis === 'reference'
-              ? <>ZOL 参考价 约 {formatYuan(c.estimate.cents)}{c.estimate.observedAt ? ` · ${formatObserved(c.estimate.observedAt)}` : ''}</>
-              : <>同芯片 {c.estimate.samples} 款中位价 约 {formatYuan(c.estimate.cents)}</>}
-          </p>
+          <p className="estimate-line">{estimateText(c.estimate)}</p>
         )}
         {!confirmed && c.estimate?.basis === 'reference' && c.priceTrend && <TrendLine current={c.estimate.cents} trend={c.priceTrend} />}
         {c.performance && <PerfLine slot={c.slot} perf={c.performance} />}

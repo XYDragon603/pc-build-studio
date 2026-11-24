@@ -1,4 +1,5 @@
-import { FilePlus2, Loader2, Trash2 } from 'lucide-react';
+import { Download, FilePlus2, Loader2, Trash2, Upload } from 'lucide-react';
+import { useRef } from 'react';
 import { formatYuan } from '../domain/money';
 import { Dialog } from './Dialog';
 
@@ -22,9 +23,13 @@ interface Props {
   onLoad: (id: string) => void;
   onDelete: (id: string) => void;
   onNew: () => void;
+  newLabel?: string;
+  onBackup?: () => void;
+  onRestore?: (file: File) => void;
 }
 
-export function PlansDialog({ open, plans, error, storageLabel, currentId, onClose, onLoad, onDelete, onNew }: Props) {
+export function PlansDialog({ open, plans, error, storageLabel, currentId, onClose, onLoad, onDelete, onNew, newLabel = '从演示方案新建', onBackup, onRestore }: Props) {
+  const file = useRef<HTMLInputElement>(null);
   return (
     <Dialog open={open} title="我的方案" onClose={onClose} width={540}>
       <div className="dialog-body">
@@ -54,8 +59,19 @@ export function PlansDialog({ open, plans, error, storageLabel, currentId, onClo
           </ul>
         )}
         <footer className="dialog-actions">
+          {onBackup && <button type="button" className="btn btn-ghost" onClick={onBackup}><Download size={16} /> 导出备份</button>}
+          {onRestore && (
+            <>
+              <input ref={file} type="file" accept=".json,application/json" hidden onChange={e => {
+                const selected = e.target.files?.[0];
+                e.target.value = '';
+                if (selected) onRestore(selected);
+              }} />
+              <button type="button" className="btn btn-ghost" onClick={() => file.current?.click()}><Upload size={16} /> 恢复备份</button>
+            </>
+          )}
           <button type="button" className="btn btn-ghost" onClick={() => { onNew(); onClose(); }}>
-            <FilePlus2 size={16} /> 从演示方案新建
+            <FilePlus2 size={16} /> {newLabel}
           </button>
         </footer>
       </div>

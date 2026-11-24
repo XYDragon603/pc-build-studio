@@ -1,20 +1,20 @@
-import { Monitor } from 'lucide-react';
-import { useEffect, useReducer, useState } from 'react';
+import { Folder, LayoutGrid, Layers, Monitor, PencilLine } from 'lucide-react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import { api, ApiError, type CatalogItem, type PlanResult } from '../api/client';
 import { fromApi, sameContent, toApiInput } from '../api/mapping';
-import { PlansDialog, type PlanSummary } from '../components/PlansDialog';
+import type { PlanSummary } from '../components/PlansDialog';
 import { PriceDialog, type PriceRequest } from '../components/PriceDialog';
 import { buildReducer } from '../domain/build';
 import { catalogToCandidate } from '../domain/catalog';
 import { buildMarkdown, downloadText } from '../domain/exportList';
-import { formatYuan } from '../domain/money';
 import { emptyBuild, INTEGRATED_GPU_NAME, isIntegratedGpu, planToBuild } from '../domain/plan';
 import { SLOT_IDS, slotDef } from '../domain/slots';
-import { loadDraft, saveDraft } from '../domain/storage';
 import type { Build, Candidate, SlotId } from '../domain/types';
 import { Editor } from './Editor';
-import { Home, scenariosOf, type Purpose } from './Home';
+import { Home, type PlanGeneration, type Purpose } from './Home';
 import { PartPicker } from './PartPicker';
+import { SavedPlans } from './SavedPlans';
+import { useDraft } from './useDraft';
 import './next.css';
 
 /** 带核显的 CPU（与服务端规则一致）：标注了集成显卡，或 AMD G 系列 / Intel 非 F 型号 */
@@ -30,23 +30,32 @@ const integratedGpuCandidate: Candidate = {
   store: 'other', storeLabel: '', condition: 'new', priceCents: 0, state: 'confirmed', url: null, specs: {},
 };
 
+type View = 'home' | 'editor' | 'plans' | 'catalog';
+const NAV = [
+  { view: 'home', icon: Layers, label: '方案推荐' },
+  { view: 'editor', icon: PencilLine, label: '配置编辑' },
+  { view: 'plans', icon: Folder, label: '我的方案' },
+  { view: 'catalog', icon: LayoutGrid, label: '配件库' },
+] as const;
+
 export default function NextApp() {
-  const [view, setView] = useState<'home' | 'editor'>('home');
+  const [view, setView] = useState<View>('home');
   const [budgetYuan, setBudgetYuan] = useState(6000);
   const [purpose, setPurpose] = useState<Purpose>('game');
   const [quiet, setQuiet] = useState(false);
-  const [plans, setPlans] = useState<PlanResult[] | null>(null);
-  const [draft, setDraft] = useState<Build | null>(() => loadDraft());
+  const [generation, setGeneration] = useState<PlanGeneration | null>(null);
   const [build, dispatch] = useReducer(buildReducer, undefined, () => emptyBuild(600000, ['2k'], '新方案'));
+  const { draft, draftStatus } = useDraft(view === 'editor', build);
+  const activeBuildId = useRef(build.id);
+  const editorOpened = useRef(false);
   const [saved, setSaved] = useState<Build | null>(null);
   const [saving, setSaving] = useState(false);
   const [pickerSlot, setPickerSlot] = useState<SlotId | null>(null);
   const [priceReq, setPriceReq] = useState<PriceRequest | null>(null);
-  const [plansOpen, setPlansOpen] = useState(false);
+  const [catalogSlot, setCatalogSlot] = useState<SlotId>('gpu');
   const [planList, setPlanList] = useState<{ items: PlanSummary[] | null; versions: Record<string, number>; error: string | null }>({ items: null, versions: {}, error: null });
   const [toast, setToast] = useState<string | null>(null);
 
-  useEffect(() => { if (view === 'editor') { saveDraft(build); setDraft(build); } }, [build, view]);
   useEffect(() => {
     if (!toast) return;
     const id = window.setTimeout(() => setToast(null), 3000);
@@ -54,24 +63,29 @@ export default function NextApp() {
   }, [toast]);
 
   const openBuild = (b: Build, snapshot: Build | null) => {
+    editorOpened.current = true;
+    activeBuildId.current = b.id;
     dispatch({ type: 'load', build: b });
     setSaved(snapshot);
+    setPickerSlot(null);
     setView('editor');
   };
 
-  const choosePlan = (plan: PlanResult) => {
-    openBuild(planToBuild(plan, budgetYuan * 100, scenariosOf(purpose, quiet)), null);
+  const choosePlan = (plan: PlanResult, request: PlanGeneration) => {
+    openBuild(planToBuild(plan, request.budgetCents, request.scenarios), null);
+    setPickerSlot('gpu');
     setToast(`已选 ${plan.label}，可以逐件替换或改成实付价`);
   };
 
-  const pickItem = (item: CatalogItem) => {
-    const slot = pickerSlot!;
-    if (!item.estimatedPriceCents) return;
-    dispatch({ type: 'addCandidate', candidate: catalogToCandidate(item, slot), priceCents: item.estimatedPriceCents, priceSource: 'estimate', note: '手动选择，价格为参考价' });
-    if (slot === 'cpu' && isIntegratedGpu(build.slots.gpu.part) && !cpuHasIgpu(item)) {
+  const pickItem = (slot: SlotId, item: CatalogItem, target = build) => {
+    if (target.slots[slot].locked || target.slots[slot].part?.catalogId === item.id) return;
+    const priceCents = item.estimatedPriceCents ?? null;
+    dispatch({ type: 'addCandidate', candidate: catalogToCandidate(item, slot), priceCents, priceSource: priceCents === null ? 'manual' : 'estimate' });
+    setPickerSlot(null);
+    if (slot === 'cpu' && isIntegratedGpu(target.slots.gpu.part) && !cpuHasIgpu(item)) {
       setToast('这颗 CPU 没有核显，需要再配一张独立显卡');
     } else {
-      setToast(`已换成 ${item.name}`);
+      setToast(priceCents === null ? `已选择 ${item.name}，请填写实付价` : `已换成 ${item.name}`);
     }
   };
 
@@ -96,9 +110,11 @@ export default function NextApp() {
     try {
       const input = toApiInput(build);
       const r = build.serverId ? await api.updateBuild(build.serverId, { ...input, version: build.version! }) : await api.createBuild(input);
-      const next = fromApi(r);
-      setSaved(next);
-      dispatch({ type: 'markSaved', serverId: r.id, version: r.version, updatedAt: r.updatedAt });
+      if (activeBuildId.current === build.id) {
+        activeBuildId.current = r.id;
+        setSaved(fromApi(r));
+        dispatch({ type: 'markSaved', serverId: r.id, version: r.version, updatedAt: r.updatedAt });
+      }
       setToast('方案已保存');
     } catch (e) {
       setToast(e instanceof ApiError && e.code === 'VERSION_CONFLICT' ? '这份方案在别处被改过，请从“我的方案”重新打开' : e instanceof Error ? e.message : '保存失败');
@@ -107,8 +123,7 @@ export default function NextApp() {
     }
   };
 
-  const openPlans = async () => {
-    setPlansOpen(true);
+  const refreshPlans = async () => {
     setPlanList(p => ({ ...p, items: null, error: null }));
     try {
       const items = await api.listBuilds();
@@ -136,7 +151,7 @@ export default function NextApp() {
     try {
       await api.deleteBuild(id, planList.versions[id]);
       setToast('方案已删除');
-      openPlans();
+      void refreshPlans();
     } catch (e) {
       setToast(e instanceof Error ? e.message : '删除失败');
     }
@@ -147,64 +162,114 @@ export default function NextApp() {
     setToast('清单已导出');
   };
 
+  const backupPlans = async () => {
+    try {
+      const backup = await api.backupBuilds();
+      downloadText('装机方案备份.json', JSON.stringify(backup, null, 2), 'application/json');
+      setToast(`已导出 ${backup.builds.length} 份方案`);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '导出备份失败');
+    }
+  };
+
+  const restorePlans = async (file: File) => {
+    try {
+      if (file.size > 16 * 1024 ** 2) throw new Error('备份文件不能超过 16 MB');
+      const result = await api.restoreBuilds(JSON.parse(await file.text()));
+      setToast(`已恢复 ${result.restored} 份方案，跳过 ${result.skipped} 份已有方案`);
+      await refreshPlans();
+    } catch (e) {
+      setToast(e instanceof SyntaxError ? '备份文件不是有效的 JSON' : e instanceof Error ? e.message : '恢复失败');
+    }
+  };
+
+  const navigate = (to: View) => {
+    if (to === 'editor' && !editorOpened.current && draft) {
+      openBuild(draft, null);
+      return;
+    }
+    if (to === 'editor') editorOpened.current = true;
+    if (to === 'plans') void refreshPlans();
+    if (to !== 'editor') setPickerSlot(null);
+    setView(to);
+  };
+
+  const resume = () => { if (draft) openBuild(draft, null); };
+  const catalogBuild = !editorOpened.current && draft ? draft : build;
+
   return (
     <div className="nx-app">
-      <header className="nx-top">
-        <span className="nx-brand"><Monitor size={22} /> 装机工作台</span>
-        {view === 'editor' && <span className="nx-muted">预算 {formatYuan(build.budgetCents)}</span>}
-        <button type="button" className="nx-btn nx-btn-ghost" onClick={openPlans}>我的方案</button>
-      </header>
+      <aside className="nx-nav">
+        <div className="nx-brand"><span className="nx-brand-icon"><Monitor size={24} /></span><span><strong>装机工作台</strong><small>PC Build Studio</small></span></div>
+        <nav aria-label="工作台导航">
+          {NAV.map(({ view: to, icon: Icon, label }) => (
+            <button type="button" key={to} className={to === view ? 'on' : ''} aria-current={to === view ? 'page' : undefined} onClick={() => navigate(to)}><Icon size={20} aria-hidden />{label}</button>
+          ))}
+        </nav>
+      </aside>
 
       <main className="nx-main">
-        {view === 'home' ? (
+        {view === 'home' && (
           <Home
             budgetYuan={budgetYuan}
             purpose={purpose}
             quiet={quiet}
             onBudget={setBudgetYuan}
-            onPurpose={p => { setPurpose(p); setPlans(null); }}
-            onQuiet={q => { setQuiet(q); setPlans(null); }}
-            plans={plans}
-            onPlans={setPlans}
+            onPurpose={setPurpose}
+            onQuiet={setQuiet}
+            generation={generation}
+            onPlans={setGeneration}
             onChoose={choosePlan}
             draft={draft}
-            onResume={() => draft && openBuild(draft, null)}
+            onResume={resume}
           />
-        ) : (
+        )}
+        {view === 'editor' && (
           <Editor
             build={build}
             dispatch={dispatch}
-            onBack={() => setView('home')}
+            activeSlot={pickerSlot}
+            picker={pickerSlot && <PartPicker
+              key={pickerSlot}
+              slot={pickerSlot}
+              build={build}
+              onClose={() => setPickerSlot(null)}
+              onPick={item => pickItem(pickerSlot, item)}
+              onIntegrated={pickerSlot === 'gpu' && !build.slots.gpu.locked ? () => {
+                dispatch({ type: 'addCandidate', candidate: integratedGpuCandidate, priceCents: 0, priceSource: 'manual', note: '核显方案' });
+                setPickerSlot(null);
+                setToast('已改为使用 CPU 核显');
+              } : undefined}
+            />}
+            onClosePicker={() => setPickerSlot(null)}
             onPick={setPickerSlot}
             onEditPrice={editPrice}
             onSave={save}
             saving={saving}
             saveText={saveText}
+            draftStatus={draftStatus}
             onExport={exportList}
-            onOpenPlans={openPlans}
           />
+        )}
+        {view === 'plans' && <SavedPlans
+          plans={planList.items} error={planList.error} currentId={build.id} draft={draft}
+          onLoad={loadPlan} onDelete={removePlan} onResume={resume} onNew={() => navigate('home')}
+          onBackup={backupPlans} onRestore={restorePlans}
+        />}
+        {view === 'catalog' && (
+          <div className="nx-page nx-catalog">
+            <header className="nx-page-head"><h1>配件库</h1><p className="nx-muted">筛选型号、比较规格和估算价</p></header>
+            <PartPicker key={catalogSlot} slot={catalogSlot} build={catalogBuild} onCategory={setCatalogSlot} onPick={item => {
+              if (catalogBuild !== build) openBuild(catalogBuild, null);
+              editorOpened.current = true;
+              pickItem(catalogSlot, item, catalogBuild);
+              setView('editor');
+            }} />
+          </div>
         )}
       </main>
 
-      <PartPicker
-        slot={pickerSlot}
-        build={build}
-        onClose={() => setPickerSlot(null)}
-        onPick={pickItem}
-        onIntegrated={() => { dispatch({ type: 'addCandidate', candidate: integratedGpuCandidate, priceCents: 0, priceSource: 'manual', note: '核显方案' }); setToast('已改为使用 CPU 核显'); }}
-      />
       <PriceDialog request={priceReq} jdEnabled={false} onClose={() => setPriceReq(null)} />
-      <PlansDialog
-        open={plansOpen}
-        plans={planList.items}
-        error={planList.error}
-        storageLabel="保存在本机。"
-        currentId={build.id}
-        onClose={() => setPlansOpen(false)}
-        onLoad={loadPlan}
-        onDelete={removePlan}
-        onNew={() => setView('home')}
-      />
       <div className="toast-region" role="status" aria-live="polite">{toast && <div className="toast">{toast}</div>}</div>
     </div>
   );
