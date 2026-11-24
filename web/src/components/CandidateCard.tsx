@@ -31,7 +31,9 @@ function sourceLine(c: Candidate) {
 function PerfLine({ slot, perf }: { slot: Candidate['slot']; perf: NonNullable<Candidate['performance']> }) {
   return (
     <p className="perf-line">
-      {perf.gaming && <span className="perf-gaming" title="按评测整理的 2K 游戏相对性能">2K 游戏指数 {perf.gaming.index}</span>}
+      {perf.gaming && (slot === 'gpu'
+        ? <span className="perf-gaming" title="TechPowerUp 2560x1440 相对性能（PNY RTX 5080 Slim OC = 100%，原厂 RTX 5080 为 96%）">2K 游戏 {perf.gaming.index}%</span>
+        : <span className="perf-gaming" title="1080p 游戏相对性能（Ryzen 7 9850X3D = 100%，依据 TechSpot 数据的汇总图）">游戏 {perf.gaming.index}%（1080p）</span>)}
       {perf.blender && (
         <span
           className="muted"

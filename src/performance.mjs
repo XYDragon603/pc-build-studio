@@ -32,7 +32,10 @@ export function loadPerformance(directory, dataFile = new URL('../data/perf-gami
     if (item.category === 'CPU') {
       key = cpuKey(item.name) ?? cpuKey(item.mpn) ?? item.aliases?.map(cpuKey).find(Boolean) ?? null;
       b = key && blenderCpu.get(key);
-      g = key && gamingCpu.get(key);
+      // Intel 的 K / KF、F / 无 F 是同一颗芯片去掉核显，游戏性能视为相同；AMD 的 F 型号是不同芯片，不做模糊匹配
+      const intelAlt = key && /^(I\d|ULTRA)/.test(key) ? [key.replace(/F$/, ''), `${key}F`] : [];
+      g = key && [key, ...intelAlt].map(k => gamingCpu.get(k)).find(Boolean);
+      if (!b && intelAlt.length) b = intelAlt.map(k => blenderCpu.get(k)).find(Boolean);
     } else if (item.category === 'GPU') {
       key = gpuKey(item.specs?.chipset) ?? gpuKey(item.name);
       b = key && blenderGpu.get(key);

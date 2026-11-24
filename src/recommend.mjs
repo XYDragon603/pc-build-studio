@@ -50,9 +50,9 @@ function bestWithin(pool, cap) {
 
 const cheapestOf = pool => [...pool].sort((a, b) => price(a) - price(b))[0] ?? null;
 
-/** CPU 性能分：有游戏指数用游戏指数，否则用 Blender 多核渲染分 */
-const cpuPerf = item => item.performance?.gaming?.index ?? item.performance?.blender?.score ?? null;
-const cpuPerfLabel = item => (item.performance?.gaming ? '游戏指数' : 'Blender 多核分');
+/** CPU 性能分：游戏指数与 Blender 多核分量级不同，同一次比较只用其中一种 */
+const cpuGaming = item => item.performance?.gaming?.index ?? null;
+const cpuBlender = item => item.performance?.blender?.score ?? null;
 
 /** 预算内性能分最高的；同分取更便宜的。没有性能数据的条目不参与 */
 function bestPerfWithin(pool, cap, perf) {
@@ -122,9 +122,13 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
     const currentFits = current.some(i => price(i) <= cap('CPU'));
     const pool = currentFits ? current : all;
     const platform = currentFits ? '优先 AM5 / LGA1700 / LGA1851 平台，' : '当前平台超出分配，放宽到 AM4，';
-    const byPerf = bestPerfWithin(pool, cap('CPU'), cpuPerf);
+    // 预算内有游戏指数的型号就只按游戏指数比，否则按 Blender 多核分
+    const byGaming = bestPerfWithin(pool, cap('CPU'), cpuGaming);
+    const byPerf = byGaming ?? bestPerfWithin(pool, cap('CPU'), cpuBlender);
     if (byPerf) {
-      set('CPU', byPerf, `分配 ${yuan(cap('CPU'))}，${platform}选预算内${cpuPerfLabel(byPerf)}最高的（${cpuPerf(byPerf)}）`);
+      set('CPU', byPerf, byGaming
+        ? `分配 ${yuan(cap('CPU'))}，${platform}选预算内游戏指数最高的（${cpuGaming(byPerf)}%，1080p，9850X3D = 100）`
+        : `分配 ${yuan(cap('CPU'))}，${platform}预算内没有游戏指数数据，选 Blender 多核分最高的（${cpuBlender(byPerf)}）`);
     } else {
       const r = bestWithin(pool, cap('CPU'));
       if (r) set('CPU', r.item, `分配 ${yuan(cap('CPU'))}，${platform}没有性能数据，选预算内估算价最高的${r.over ? '（预算不足，取最便宜的）' : ''}`);
@@ -166,22 +170,28 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
       return { key, list, median: sorted[Math.floor(sorted.length / 2)], current: CURRENT_GPU.test(key), gaming };
     })
       // 有游戏指数的档次按指数排序（同指数按价格），否则按中位价排序
-      .sort((a, b) => (a.gaming != null && b.gaming != null ? a.gaming - b.gaming || a.median - b.median : a.median - b.median));
+      .sort((a, b) => (a.gaming ?? -1) - (b.gaming ?? -1) || a.median - b.median);
     // 当代芯片里有在分配内的，就只在当代芯片里升降档；否则才考虑上代
     const capGpu = locked.GPU ? 0 : cap('GPU');
-    const current = all.filter(g => g.current);
-    return current.some(g => g.median <= capGpu) ? current : all;
+    // 有游戏指数的档次里有在分配内的，就只在这些档次里比（指数与价格不能混排）
+    const withGaming = all.filter(g => g.gaming != null);
+    const base = withGaming.some(g => g.median <= capGpu) ? withGaming : all;
+    const current = base.filter(g => g.current);
+    return current.some(g => g.median <= capGpu) ? current : base;
   })();
   let gpuTier = -1;
   const pickGpu = tier => {
     const g = gpuGroups[tier];
     const item = cheapestOf(g.list);
-    set('GPU', item, `档次 ${g.key}（${g.list.length} 款中位价 ${yuan(g.median)}${g.gaming != null ? `，2K 游戏指数 ${g.gaming}` : ''}${g.current ? '，当代芯片' : ''}），选这一档里最便宜的一款`);
+    set('GPU', item, `档次 ${g.key}（${g.list.length} 款中位价 ${yuan(g.median)}${g.gaming != null ? `，2K 游戏性能 ${g.gaming}%` : ''}${g.current ? '，当代芯片' : ''}），选这一档里最便宜的一款`);
   };
   if (!locked.GPU && gpuGroups.length) {
     const c = cap('GPU');
     // 预算内性能最高的一档（有游戏指数时就是指数最高、中位价不超分配的那档）
-    gpuTier = gpuGroups.reduce((best, g, idx) => (g.median <= c && (best < 0 || (g.gaming ?? g.median) >= (gpuGroups[best].gaming ?? gpuGroups[best].median)) ? idx : best), -1);
+    const byGaming = gpuGroups.some(g => g.gaming != null);
+    // 列表已按（游戏指数，中位价）或中位价升序：取分配内最后一个，即性能最高的一档
+    if (!byGaming) gpuGroups.sort((a, b) => a.median - b.median);
+    gpuTier = gpuGroups.reduce((best, g, idx) => (g.median <= c ? idx : best), -1);
     if (gpuTier < 0) gpuTier = 0;
     pickGpu(gpuTier);
   }

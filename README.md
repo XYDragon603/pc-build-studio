@@ -79,7 +79,7 @@ Unregister-ScheduledTask -TaskName PCBuilder-RefreshPrices -Confirm:$false
 ## 性能参考
 
 - **Blender 渲染跑分**（[Blender Open Data](https://opendata.blender.org/)，CC0）：下载快照后运行 `npm run perf:blender`，按型号取 Blender 4.5.0 的中位数（≥3 次提交），写入 `.runtime/blender-scores.json`。CPU 的多核分比较可靠；显卡分只代表渲染，跨厂商明显偏向 NVIDIA（如 RX 9070 XT 的渲染分只与 RTX 4060 相当），不能当游戏性能用。
-- **游戏相对性能**：`data/perf-gaming.json`，按公开评测整理并注明出处、分辨率与基准卡。为空时自动配置的显卡档次仍按估算价判断。
+- **游戏相对性能**：`data/perf-gaming.json`，按公开评测截图逐条录入并注明出处、分辨率与基准。显卡：TechPowerUp 2560x1440 相对性能（PNY RTX 5080 Slim OC = 100%，40 款）；CPU：依据 TechSpot 数据的 1080p 游戏性能汇总图（Ryzen 7 9850X3D = 100%，2026-08-02，47 款）。Intel K / KF、F / 无 F 视为同性能。表中没有的型号回退到 Blender 分（CPU）或估算价（显卡）。
 
 ```powershell
 curl -o .runtime/blender-opendata/opendata-latest.zip https://opendata.blender.org/snapshots/opendata-latest.zip

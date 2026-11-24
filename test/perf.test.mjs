@@ -51,3 +51,15 @@ test('目录条目挂上 Blender 分与游戏指数；显卡游戏表优先按�
   assert.deepEqual([g16.performance.gaming.index, g8.performance.gaming.index], [100, 93]);
   assert.equal(attach({ category: 'RAM', name: 'x', specs: {} }).performance, undefined);
 });
+
+test('Intel KF / F 型号对上 K / 无 F 的游戏指数；AMD 不做模糊匹配', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'perf-intel-'));
+  t.after(async () => { for (const f of await readdir(dir)) await unlink(join(dir, f)); await rmdir(dir); });
+  const gamingFile = join(dir, 'gaming.json');
+  await writeFile(gamingFile, JSON.stringify({ gpu: null, cpu: { source: 'x', entries: [
+    { key: 'I5-14600K', relative: 72 }, { key: 'I3-14100F', relative: 53.5 }, { key: 'RYZEN 7600X', relative: 72.1 } ] } }));
+  const { attach } = loadPerformance(dir, gamingFile);
+  assert.equal(attach({ category: 'CPU', name: 'Intel 酷睿 i5 14600KF', specs: {} }).performance.gaming.index, 72);
+  assert.equal(attach({ category: 'CPU', name: 'Intel 酷睿 i3 14100', specs: {} }).performance.gaming.index, 53.5);
+  assert.equal(attach({ category: 'CPU', name: 'AMD Ryzen 5 7600', specs: {} }).performance, undefined);
+});

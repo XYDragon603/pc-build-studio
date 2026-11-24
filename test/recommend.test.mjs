@@ -90,5 +90,13 @@ test('有游戏指数时显卡按指数选档次', () => {
   const gpus = [gpu('Radeon RX 9070 XT', 450000, 140), gpu('Radeon RX 9070 XT', 460000, 140), gpu('GeForce RTX 5070', 440000, 110), gpu('GeForce RTX 5070', 450000, 110)];
   const r = recommend([...catalog.filter(i => i.category !== 'GPU'), ...gpus], { budgetCents: 1200000, scenarios: ['2k'] });
   assert.match(bySlot(r).GPU.specs.chipset, /9070 XT/);
-  assert.match(r.picks.find(p => p.slot === 'GPU').reason, /2K 游戏指数 140/);
+  assert.match(r.picks.find(p => p.slot === 'GPU').reason, /2K 游戏性能 140%/);
+});
+
+test('游戏指数与 Blender 分不混比：预算内有游戏指数时只按游戏指数挑 CPU', () => {
+  const x3d = { ...item('CPU', 130000, { socket: 'AM5', maxPowerWatts: 162 }), performance: { gaming: { index: 96.4 }, blender: { score: 334 } } };
+  const manyCores = { ...item('CPU', 135000, { socket: 'AM5', maxPowerWatts: 162 }), performance: { blender: { score: 600 } } };
+  const r = recommend([...catalog.filter(i => i.category !== 'CPU'), x3d, manyCores], { budgetCents: 800000, scenarios: ['2k'] });
+  assert.equal(bySlot(r).CPU.id, x3d.id);
+  assert.match(r.picks.find(p => p.slot === 'CPU').reason, /游戏指数最高/);
 });
