@@ -355,6 +355,44 @@ function addClassEstimates(items) {
   });
 }
 
+/**
+ * 补功耗：缺字段时估算，并在 estimatedSpecs 里注明，界面显示“估算”。
+ * - 显卡 tdpWatts（整卡功耗）：同芯片其他型号的中位数（海外数据几乎每个芯片都有）
+ * - AMD CPU maxPowerWatts：PPT = TDP × 1.35（65→88、105→142、120→162、170→230，与 AMD 规格一致）
+ * - Intel CPU maxPowerWatts：同 TDP 的其他 Intel 型号峰值功耗中位数
+ */
+function addPowerEstimates(items) {
+  const gpuChip = item => item.specs?.chipset
+    ? normalize(String(item.specs.chipset).replace(/^(geforce|radeon|intel)\s*/i, '').replace(/\s*\d+\s*gb$/i, '')) : null;
+  const isAmd = item => /amd|锐龙|ryzen|athlon|速龙/i.test(`${item.manufacturer ?? ''} ${item.name}`);
+  const chipTdp = new Map();
+  const intelPeak = new Map();
+  for (const item of items) {
+    const s = item.specs ?? {};
+    if (item.category === 'GPU' && s.tdpWatts > 0 && gpuChip(item)) {
+      if (!chipTdp.has(gpuChip(item))) chipTdp.set(gpuChip(item), []);
+      chipTdp.get(gpuChip(item)).push(s.tdpWatts);
+    }
+    if (item.category === 'CPU' && !isAmd(item) && s.tdpWatts > 0 && s.maxPowerWatts > 0) {
+      if (!intelPeak.has(s.tdpWatts)) intelPeak.set(s.tdpWatts, []);
+      intelPeak.get(s.tdpWatts).push(s.maxPowerWatts);
+    }
+  }
+  return items.map(item => {
+    const s = item.specs ?? {};
+    if (item.category === 'GPU' && !(s.tdpWatts > 0)) {
+      const samples = chipTdp.get(gpuChip(item));
+      if (samples?.length) return { ...item, specs: { ...s, tdpWatts: median(samples) }, estimatedSpecs: ['tdpWatts'] };
+    }
+    if (item.category === 'CPU' && !(s.maxPowerWatts > 0) && s.tdpWatts > 0) {
+      const samples = isAmd(item) ? null : intelPeak.get(s.tdpWatts);
+      const peak = isAmd(item) ? Math.round(s.tdpWatts * 1.35) : samples?.length >= 2 ? median(samples) : null;
+      if (peak) return { ...item, specs: { ...s, maxPowerWatts: peak }, estimatedSpecs: ['maxPowerWatts'] };
+    }
+    return item;
+  });
+}
+
 /** 中英文品牌名互通：搜“华硕”能找到 ASUS，反之亦然 */
 const BRAND_ALIASES = [
   ['asus', '华硕'], ['msi', '微星'], ['gigabyte', '技嘉'], ['asrock', '华擎'], ['colorful', '七彩虹'], ['galax', '影驰'], ['zotac', '索泰'],
@@ -425,7 +463,7 @@ export function createCatalog(directory = '.runtime') {
   const imported = readImported(directory);
   const zol = readImported(directory, 'zol-catalog.json');
   const performance = loadPerformance(directory);
-  const items = addImages(addTrends(addClassEstimates(addEstimates(addZol(mergeCatalog(imported.items), zol.items))), readPriceHistory(directory))
+  const items = addImages(addTrends(addClassEstimates(addEstimates(addPowerEstimates(addZol(mergeCatalog(imported.items), zol.items)))), readPriceHistory(directory))
     .map(item => ({
       ...performance.attach(item),
       market: item.dataSource === 'zol' || item.zolId || verifiedIds.has(item.id) ? 'cn' : 'global',

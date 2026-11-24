@@ -44,6 +44,11 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
   const bios = checks.find(c => c.id === 'bios');
   const items = useCatalogItems(SLOTS.map(s => build.slots[s.id].part?.catalogId));
   const power = estimatePower(build);
+  // CPU / 显卡的功耗有一项是按同类估算的，就在功耗旁注明
+  const powerEstimated = (['cpu', 'gpu'] as const).some(id => {
+    const catalogId = build.slots[id].part?.catalogId;
+    return catalogId ? items[catalogId]?.estimatedSpecs?.some(f => f === 'tdpWatts' || f === 'maxPowerWatts') : false;
+  });
   const over = t.remainingCents < 0;
   const status = summary.level === 'ok' && bios ? 'warn' : summary.level;
   const StatusIcon = CHECK_ICONS[status];
@@ -122,7 +127,7 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
             <div className="nx-inspector-scroll">
               <div className={`nx-check-summary nx-tag ${status}`}><StatusIcon size={17} />{summary.level === 'ok' && bios ? bios.label : summary.text}</div>
               <ul className="nx-check-list">{checks.map(check => <CheckRow key={check.id} check={check} />)}</ul>
-              <div className="nx-power"><span>预估满载功耗</span><strong>{power.estimatedLoadWatts == null ? '待补充规格' : `${power.estimatedLoadWatts} W`}</strong></div>
+              <div className="nx-power"><span>预估满载功耗</span><strong title={powerEstimated ? '部分功耗按同芯片 / 同规格型号估算' : undefined}>{power.estimatedLoadWatts == null ? '待补充规格' : `${powerEstimated ? '约 ' : ''}${power.estimatedLoadWatts} W`}</strong></div>
             </div>
           </aside>
         )}

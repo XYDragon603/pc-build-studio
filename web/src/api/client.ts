@@ -136,6 +136,8 @@ export interface CatalogItem {
   priceRangeCents?: [number, number];
   /** ZOL 参考价明显低于同规格其他型号，可能是涨价前的旧价（估算价已改用同规格中位价） */
   possiblyStale?: boolean;
+  /** 缺数据时估算出来的规格字段（如显卡 tdpWatts 取同芯片中位数） */
+  estimatedSpecs?: string[];
   /** 联想搜索的匹配分 */
   matchScore?: number;
   estimateSamples?: number;

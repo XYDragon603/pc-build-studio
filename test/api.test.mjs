@@ -395,6 +395,29 @@ test('同类粗估：主板按芯片组、机箱按尺寸、显卡按芯片（�
   assert.ok(plans.data.plans.flatMap(plan => plan.picks).every(pick => !['series-low', 'class-median'].includes(pick.item.estimateBasis)));
 });
 
+test('缺功耗时估算：显卡取同芯片 TDP 中位数，AMD 按 PPT，Intel 按同 TDP 中位数，并注明估算', async t => {
+  const part = (id, name, category, specs) => ({ id, name, category, specs });
+  const request = await estimateFixture(t, [
+    part('zol-1650', '七彩虹 GTX 1650 4G', 'GPU', { chipset: 'GeForce GTX 1650', recommendedPsuWatts: 300 }),
+    part('zol-4100', 'AMD Ryzen 3 4100', 'CPU', { tdpWatts: 65 }),
+    part('zol-12400', 'Intel 酷睿 i5 12400', 'CPU', { tdpWatts: 65 }),
+    part('zol-own', 'AMD Ryzen 5 7600', 'CPU', { tdpWatts: 65, maxPowerWatts: 88 }),
+  ], [
+    part('buildcores-1650a', 'GTX 1650 A', 'GPU', { chipset: 'GeForce GTX 1650 4 GB', tdpWatts: 75 }),
+    part('buildcores-1650b', 'GTX 1650 B', 'GPU', { chipset: 'GeForce GTX 1650', tdpWatts: 75 }),
+    part('buildcores-1650c', 'GTX 1650 C', 'GPU', { chipset: 'GeForce GTX 1650', tdpWatts: 90 }),
+    part('buildcores-i5a', 'Intel Core i5-13400', 'CPU', { tdpWatts: 65, maxPowerWatts: 148 }),
+    part('buildcores-i5b', 'Intel Core i5-14400', 'CPU', { tdpWatts: 65, maxPowerWatts: 148 }),
+    part('buildcores-i5c', 'Intel Core i5-12500', 'CPU', { tdpWatts: 65, maxPowerWatts: 117 }),
+  ]);
+  const get = async id => (await request('/catalog/' + id)).data;
+  assert.deepEqual([(await get('zol-1650')).specs.tdpWatts, (await get('zol-1650')).estimatedSpecs], [75, ['tdpWatts']]);
+  assert.deepEqual([(await get('zol-4100')).specs.maxPowerWatts, (await get('zol-4100')).estimatedSpecs], [88, ['maxPowerWatts']]);
+  assert.equal((await get('zol-12400')).specs.maxPowerWatts, 148);
+  const own = await get('zol-own');
+  assert.deepEqual([own.specs.maxPowerWatts, own.estimatedSpecs], [88, undefined]);
+});
+
 test('输入联想：模糊匹配型号、中英文品牌互通，按匹配度排序', async t => {
   const part = (id, name, extra = {}) => ({ id, name, category: 'GPU', specs: {}, referencePriceCents: 300000, ...extra });
   const request = await estimateFixture(t, [
