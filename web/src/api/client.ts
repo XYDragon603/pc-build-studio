@@ -120,6 +120,14 @@ export interface CatalogItem {
   estimateSamples?: number;
   /** 参考价走势：最近一次变价与记录到的最低价 */
   priceTrend?: PriceTrend;
+  /** 性能参考：Blender 渲染跑分（CC0）与按评测整理的游戏指数 */
+  performance?: Performance;
+}
+
+export interface Performance {
+  key: string;
+  blender: { score: number; runs: number; api: string } | null;
+  gaming: { index: number; label: string | null } | null;
 }
 
 export interface PriceTrend {

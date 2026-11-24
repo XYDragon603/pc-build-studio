@@ -74,3 +74,21 @@ test('高功耗 CPU 配 240mm 以上水冷，机箱需支持冷排', () => {
   assert.ok(p.COOLER.specs.radiatorSizeMm >= 240);
   assert.ok(p.CASE.specs.maxRadiatorMm >= p.COOLER.specs.radiatorSizeMm);
 });
+
+test('有性能数据时 CPU 按性能分挑，不按价格', () => {
+  const perfCatalog = catalog.map(i => i.category !== 'CPU' ? i : i);
+  const cheapFast = { ...item('CPU', 120000, { socket: 'AM5', maxPowerWatts: 88 }), performance: { blender: { score: 400 } } };
+  const pricySlow = { ...item('CPU', 140000, { socket: 'AM5', maxPowerWatts: 88 }), performance: { blender: { score: 250 } } };
+  const r = recommend([...perfCatalog.filter(i => i.category !== 'CPU'), cheapFast, pricySlow], { budgetCents: 800000, scenarios: ['2k'] });
+  assert.equal(bySlot(r).CPU.id, cheapFast.id);
+  assert.match(r.picks.find(p => p.slot === 'CPU').reason, /Blender 多核分最高/);
+});
+
+test('有游戏指数时显卡按指数选档次', () => {
+  const gpu = (chip, cents, index) => ({ ...item('GPU', cents, { chipset: chip, capacityGB: 16, lengthMm: 300, recommendedPsuWatts: 650 }), performance: { gaming: { index } } });
+  // 同价位：指数高的 RX 9070 XT 应胜出
+  const gpus = [gpu('Radeon RX 9070 XT', 450000, 140), gpu('Radeon RX 9070 XT', 460000, 140), gpu('GeForce RTX 5070', 440000, 110), gpu('GeForce RTX 5070', 450000, 110)];
+  const r = recommend([...catalog.filter(i => i.category !== 'GPU'), ...gpus], { budgetCents: 1200000, scenarios: ['2k'] });
+  assert.match(bySlot(r).GPU.specs.chipset, /9070 XT/);
+  assert.match(r.picks.find(p => p.slot === 'GPU').reason, /2K 游戏指数 140/);
+});

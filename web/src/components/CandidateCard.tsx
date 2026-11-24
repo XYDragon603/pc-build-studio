@@ -27,6 +27,23 @@ function sourceLine(c: Candidate) {
   return `${c.storeLabel} · ${c.source === 'replay' ? '回放记录' : '实时检索'}${when ? ` · ${when} 观察` : ''}`;
 }
 
+/** 性能参考：游戏指数优先；显卡的 Blender 分只代表渲染，跨厂商偏向 NVIDIA */
+function PerfLine({ slot, perf }: { slot: Candidate['slot']; perf: NonNullable<Candidate['performance']> }) {
+  return (
+    <p className="perf-line">
+      {perf.gaming && <span className="perf-gaming" title="按评测整理的 2K 游戏相对性能">2K 游戏指数 {perf.gaming.index}</span>}
+      {perf.blender && (
+        <span
+          className="muted"
+          title={`Blender Open Data（CC0）${perf.blender.runs} 次提交的中位数${slot === 'gpu' ? '；渲染性能，不代表游戏，跨厂商偏向 NVIDIA' : ''}`}
+        >
+          {slot === 'cpu' ? 'Blender 多核' : 'Blender 渲染'} {Math.round(perf.blender.score)} 分
+        </span>
+      )}
+    </p>
+  );
+}
+
 /** 比上次变价多少、是否高于记录到的最低价 */
 function TrendLine({ current, trend }: { current: number; trend: NonNullable<Candidate['priceTrend']> }) {
   const diff = trend.previousCents != null ? current - trend.previousCents : 0;
@@ -76,6 +93,7 @@ export function CandidateCard({ candidate: c, verifiedCents, inBuild, slotLocked
           </p>
         )}
         {!confirmed && c.estimate?.basis === 'reference' && c.priceTrend && <TrendLine current={c.estimate.cents} trend={c.priceTrend} />}
+        {c.performance && <PerfLine slot={c.slot} perf={c.performance} />}
         {!confirmed && c.referenceCents != null && (
           <p className="muted small">{c.source === 'catalog' ? 'ZOL 参考价' : '页面标价'} {formatYuan(c.referenceCents)} · 未计入</p>
         )}

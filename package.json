@@ -11,6 +11,7 @@
     "catalog:import": "node scripts/import-buildcores.mjs",
     "catalog:zol": "node scripts/import-zol.mjs",
     "catalog:prices": "node scripts/import-zol.mjs --prices",
+    "perf:blender": "node scripts/import-blender.mjs",
     "jd:check": "node --env-file-if-exists=.env scripts/jd-check.mjs",
     "test": "node --test \"test/**/*.test.mjs\"",
     "demo": "node scripts/replay.mjs",

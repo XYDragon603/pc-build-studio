@@ -319,6 +319,8 @@ button.srow-price:disabled { cursor: default; }
 .summary > .btn { margin: 4px 20px 0; width: auto; }
 .estimate-line { margin-top: 6px; font-size: 14px; color: var(--teal); font-weight: 600; }
 .est { color: var(--ink-2); font-style: normal; }
+.perf-line { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; margin-top: 4px; }
+.perf-gaming { color: var(--teal); font-weight: 600; }
 .trend-line { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; margin-top: 2px; }
 .trend-line .down { color: var(--ok); font-weight: 600; }
 .trend-line .up { color: var(--amber); font-weight: 600; }

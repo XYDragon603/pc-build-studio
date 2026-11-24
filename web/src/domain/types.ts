@@ -72,6 +72,8 @@ export interface Candidate {
   catalogId?: string;
   /** 目录估算价：ZOL 参考价，或同芯片同显存中位价 */
   estimate?: { cents: number; basis: 'reference' | 'chip-median'; samples: number; observedAt: string | null };
+  /** 性能参考（CPU / 显卡） */
+  performance?: { key: string; blender: { score: number; runs: number; api: string } | null; gaming: { index: number; label: string | null } | null };
   /** 参考价走势（有价格历史时） */
   priceTrend?: { previousCents: number | null; changedAt: string | null; lowestCents: number; since: string; points: number };
   /** 商品图（目录数据），加载失败时退回示意图 */

@@ -76,6 +76,19 @@ npm run catalog:prices    # 重抓已抓过的 ZOL 列表页（约 50 次请求�
 Unregister-ScheduledTask -TaskName PCBuilder-RefreshPrices -Confirm:$false
 ```
 
+## 性能参考
+
+- **Blender 渲染跑分**（[Blender Open Data](https://opendata.blender.org/)，CC0）：下载快照后运行 `npm run perf:blender`，按型号取 Blender 4.5.0 的中位数（≥3 次提交），写入 `.runtime/blender-scores.json`。CPU 的多核分比较可靠；显卡分只代表渲染，跨厂商明显偏向 NVIDIA（如 RX 9070 XT 的渲染分只与 RTX 4060 相当），不能当游戏性能用。
+- **游戏相对性能**：`data/perf-gaming.json`，按公开评测整理并注明出处、分辨率与基准卡。为空时自动配置的显卡档次仍按估算价判断。
+
+```powershell
+curl -o .runtime/blender-opendata/opendata-latest.zip https://opendata.blender.org/snapshots/opendata-latest.zip
+Expand-Archive .runtime/blender-opendata/opendata-latest.zip .runtime/blender-opendata/extracted -Force
+npm run perf:blender
+```
+
+自动配置挑 CPU 时按性能分（有游戏指数用游戏指数，否则用 Blender 多核分）；显卡在有游戏指数时按指数选档次。
+
 ## 按预算自动配
 
 网页预算旁的“按预算自动配”根据预算、用途和已锁定的配件，从目录挑一套兼容配置，先预览、再应用（只替换未锁定的配件，按估算价加入）。规则在 `src/recommend.mjs`：按用途分配预算；优先当前平台（AM5 / LGA1700 / LGA1851）与当代显卡芯片；显卡按芯片档次升降以贴合预算；过滤同类同规格中明显偏离的估算价。没有性能跑分数据，档次以估算价近似，每一项都写明选择理由。

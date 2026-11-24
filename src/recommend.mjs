@@ -50,6 +50,17 @@ function bestWithin(pool, cap) {
 
 const cheapestOf = pool => [...pool].sort((a, b) => price(a) - price(b))[0] ?? null;
 
+/** CPU 性能分：有游戏指数用游戏指数，否则用 Blender 多核渲染分 */
+const cpuPerf = item => item.performance?.gaming?.index ?? item.performance?.blender?.score ?? null;
+const cpuPerfLabel = item => (item.performance?.gaming ? '游戏指数' : 'Blender 多核分');
+
+/** 预算内性能分最高的；同分取更便宜的。没有性能数据的条目不参与 */
+function bestPerfWithin(pool, cap, perf) {
+  const within = pool.filter(i => price(i) <= cap && perf(i) != null)
+    .sort((a, b) => perf(b) - perf(a) || price(a) - price(b));
+  return within[0] ?? null;
+}
+
 /** 当前平台与当代显卡芯片：用价格代表档次时，停产型号的参考价常常没更新，优先在这些里挑 */
 const CURRENT_SOCKETS = /^(AM5|LGA1700|LGA1851)$/;
 const CURRENT_GPU = /RTX\s*50\d0|RX\s*9\d{3}|ARC\s*B\d{3}/i;
@@ -109,8 +120,15 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
     const all = pools.CPU.filter(i => i.specs.socket && /^(AM5|AM4|LGA1700|LGA1851)$/.test(up(i.specs.socket)));
     const current = all.filter(i => CURRENT_SOCKETS.test(up(i.specs.socket)));
     const currentFits = current.some(i => price(i) <= cap('CPU'));
-    const r = bestWithin(currentFits ? current : all, cap('CPU'));
-    if (r) set('CPU', r.item, `分配 ${yuan(cap('CPU'))}，${currentFits ? '优先 AM5 / LGA1700 / LGA1851 平台，' : '当前平台超出分配，放宽到 AM4，'}选预算内估算价最高的${r.over ? '（预算不足，取最便宜的）' : ''}`);
+    const pool = currentFits ? current : all;
+    const platform = currentFits ? '优先 AM5 / LGA1700 / LGA1851 平台，' : '当前平台超出分配，放宽到 AM4，';
+    const byPerf = bestPerfWithin(pool, cap('CPU'), cpuPerf);
+    if (byPerf) {
+      set('CPU', byPerf, `分配 ${yuan(cap('CPU'))}，${platform}选预算内${cpuPerfLabel(byPerf)}最高的（${cpuPerf(byPerf)}）`);
+    } else {
+      const r = bestWithin(pool, cap('CPU'));
+      if (r) set('CPU', r.item, `分配 ${yuan(cap('CPU'))}，${platform}没有性能数据，选预算内估算价最高的${r.over ? '（预算不足，取最便宜的）' : ''}`);
+    }
   }
   const socket = up(specsOf('CPU')?.socket);
 
@@ -144,8 +162,11 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
     }
     const all = [...groups.entries()].filter(([, list]) => list.length >= 2).map(([key, list]) => {
       const sorted = list.map(price).sort((a, b) => a - b);
-      return { key, list, median: sorted[Math.floor(sorted.length / 2)], current: CURRENT_GPU.test(key) };
-    }).sort((a, b) => a.median - b.median);
+      const gaming = list.find(i => i.performance?.gaming)?.performance.gaming.index ?? null;
+      return { key, list, median: sorted[Math.floor(sorted.length / 2)], current: CURRENT_GPU.test(key), gaming };
+    })
+      // 有游戏指数的档次按指数排序（同指数按价格），否则按中位价排序
+      .sort((a, b) => (a.gaming != null && b.gaming != null ? a.gaming - b.gaming || a.median - b.median : a.median - b.median));
     // 当代芯片里有在分配内的，就只在当代芯片里升降档；否则才考虑上代
     const capGpu = locked.GPU ? 0 : cap('GPU');
     const current = all.filter(g => g.current);
@@ -155,11 +176,13 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
   const pickGpu = tier => {
     const g = gpuGroups[tier];
     const item = cheapestOf(g.list);
-    set('GPU', item, `档次 ${g.key}（${g.list.length} 款中位价 ${yuan(g.median)}${g.current ? '，当代芯片' : ''}），选这一档里最便宜的一款`);
+    set('GPU', item, `档次 ${g.key}（${g.list.length} 款中位价 ${yuan(g.median)}${g.gaming != null ? `，2K 游戏指数 ${g.gaming}` : ''}${g.current ? '，当代芯片' : ''}），选这一档里最便宜的一款`);
   };
   if (!locked.GPU && gpuGroups.length) {
     const c = cap('GPU');
-    gpuTier = gpuGroups.reduce((best, g, idx) => (g.median <= c ? idx : best), 0);
+    // 预算内性能最高的一档（有游戏指数时就是指数最高、中位价不超分配的那档）
+    gpuTier = gpuGroups.reduce((best, g, idx) => (g.median <= c && (best < 0 || (g.gaming ?? g.median) >= (gpuGroups[best].gaming ?? gpuGroups[best].median)) ? idx : best), -1);
+    if (gpuTier < 0) gpuTier = 0;
     pickGpu(gpuTier);
   }
 
@@ -246,7 +269,8 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
 
   for (const slot of open) if (!picks[slot]) notes.push(`${slot} 没有找到同时满足兼容性和价格数据的型号，请手动选择。`);
   if (total() > budgetCents) notes.push(`估算总价 ${yuan(total())} 超出预算 ${yuan(total() - budgetCents)}，可提高预算或手动降低某项。`);
-  notes.push('价格为参考价估算，不是报价；档次按估算价判断，没有使用性能跑分。');
+  const usedGaming = gpuGroups.some(g => g.gaming != null);
+  notes.push(`价格为参考价估算，不是报价。CPU 按${picks.CPU?.item.performance?.gaming ? '游戏指数' : ' Blender 多核渲染分'}挑选；显卡${usedGaming ? '按 2K 游戏指数' : '按估算价'}判断档次。`);
 
   return {
     budgetCents,

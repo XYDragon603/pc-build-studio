@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { invalid, ApiError } from './api-error.mjs';
 import { slotTypes } from './builds.mjs';
+import { loadPerformance } from './performance.mjs';
 
 const verified = JSON.parse(readFileSync(new URL('../data/catalog.json', import.meta.url), 'utf8'));
 const categoryIds = new Set(slotTypes.map(({ id }) => id));
@@ -162,7 +163,9 @@ function pagination(value, fallback, min, max, field) {
 export function createCatalog(directory = '.runtime') {
   const imported = readImported(directory);
   const zol = readImported(directory, 'zol-catalog.json');
-  const items = addTrends(addEstimates(addZol(mergeCatalog(imported.items), zol.items)), readPriceHistory(directory));
+  const performance = loadPerformance(directory);
+  const items = addTrends(addEstimates(addZol(mergeCatalog(imported.items), zol.items)), readPriceHistory(directory))
+    .map(performance.attach);
   const attributions = [imported.attribution, zol.attribution].filter(Boolean);
   const byId = new Map(items.map(item => [item.id, item]));
   const searchIndex = items.map(item => ({ item,
@@ -188,7 +191,7 @@ export function createCatalog(directory = '.runtime') {
         && (!compactQuery || terms.some(term => term.includes(compactQuery))
           || tokens.every(token => terms.some(term => term.includes(token)))));
       return { items: matches.slice(offset, offset + limit).map(entry => brief(entry.item)),
-        total: matches.length, limit, offset, attribution: imported.attribution, attributions };
+        total: matches.length, limit, offset, attribution: imported.attribution, attributions, performanceSources: performance.meta };
     },
     get(id) {
       const item = byId.get(id);

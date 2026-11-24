@@ -71,6 +71,7 @@ export function catalogToCandidate(item: CatalogItem, slot: SlotId): Candidate {
       ? { cents: item.estimatedPriceCents, basis: item.estimateBasis, samples: item.estimateSamples ?? 1, observedAt: item.priceObservedAt ?? null }
       : undefined,
     priceTrend: item.priceTrend,
+    performance: item.performance,
     state: 'missing',
     url,
     imageUrl: item.imageUrl,
