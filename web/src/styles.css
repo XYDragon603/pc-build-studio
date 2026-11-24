@@ -319,6 +319,13 @@ button.srow-price:disabled { cursor: default; }
 .summary > .btn { margin: 4px 20px 0; width: auto; }
 .estimate-line { margin-top: 6px; font-size: 14px; color: var(--teal); font-weight: 600; }
 .est { color: var(--ink-2); font-style: normal; }
+.trend-line { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; margin-top: 2px; }
+.trend-line .down { color: var(--ok); font-weight: 600; }
+.trend-line .up { color: var(--amber); font-weight: 600; }
+.price-alerts { margin: 8px 20px 0; padding: 10px 12px; border-radius: var(--radius-sm); background: #f1f7ec; border: 1px solid var(--pistachio-line); font-size: 13px; }
+.price-alerts strong { display: block; margin-bottom: 4px; color: var(--teal); }
+.price-alerts ul { margin: 0 0 4px; padding-left: 16px; display: grid; gap: 2px; }
+.link-btn { border: none; background: none; padding: 0; color: var(--teal); font-weight: 600; text-decoration: underline; cursor: pointer; }
 .estimate-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .btn-sm { height: 32px; font-size: 14px; padding: 0 8px; }
 .save-status { margin: 10px 20px 0; text-align: center; font-size: 13px; color: var(--ink-2); }

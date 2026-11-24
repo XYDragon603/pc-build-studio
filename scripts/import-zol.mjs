@@ -30,6 +30,10 @@ const CATEGORIES = {
     accept: p => !p['适用类型'] || p['适用类型'].includes('台式') },
   PSU: { slug: 'power', suffix: '电源', specs: psuSpecs, summary: psuSummary,
     accept: p => !p['电源类型'] || p['电源类型'].includes('台式') },
+  // 只收台式机 CPU
+  CPU: { slug: 'cpu', suffix: 'CPU', specs: cpuSpecs, summary: cpuSummary,
+    accept: p => !p['适用类型'] || p['适用类型'].includes('台式') },
+  SSD: { slug: 'solid_state_drive', suffix: '固态硬盘', specs: ssdSpecs, summary: ssdSummary },
   // 只收 CPU 散热器（栏目里也有显卡散热器等）
   COOLER: { slug: 'cooling_product', suffix: '散热器', specs: coolerSpecs, summary: coolerSummary,
     accept: p => !p['散热器类型'] || p['散热器类型'].includes('CPU') },
@@ -48,6 +52,9 @@ const BRANDS = {
   // 主板 / 内存 / 电源
   映泰: 'Biostar', 金士顿: 'Kingston', 金百达: 'KINGBANK', 光威: 'Gloway', 芝奇: 'G.SKILL', 威刚: 'ADATA', 英睿达: 'Crucial',
   宏碁掠夺者: 'Predator', 科赋: 'Klevv', 雷克沙: 'Lexar', 朗科: 'Netac', 十铨: 'TEAMGROUP', 宇瞻: 'Apacer',
+  // 固态硬盘
+  三星: 'Samsung', 西部数据: 'Western Digital', 铠侠: 'Kioxia', 希捷: 'Seagate', 闪迪: 'SanDisk', 致态: 'ZhiTai',
+  长江存储: 'ZhiTai', 海康威视: 'Hikvision', 梵想: 'Fanxiang', 爱国者存储: 'aigo', 英特尔存储: 'Intel', 美光: 'Crucial',
   振华: 'Super Flower', 海韵: 'SeaSonic', 全汉: 'FSP Group', 长城: 'Great Wall', 长城机电: 'Great Wall',
 };
 
@@ -162,7 +169,7 @@ export function parseParams(html, suffix) {
   const title = html.match(/<title>([^<]*)<\/title>/)?.[1] ?? '';
   const englishName = title.match(/】(.+?)(?:显卡|处理器|主板|内存|硬盘|电源|机箱|散热器)?参数_/)?.[1]?.trim() ?? null;
   const crumb = text(html.match(/class="breadcrumb"[\s\S]*?<\/div>/)?.[0] ?? '');
-  const brand = crumb.split('>').map(s => s.trim()).find(s => s.endsWith(suffix) && s !== suffix)?.slice(0, -suffix.length) ?? null;
+  const brand = crumb.split('>').map(s => s.trim()).find(s => s.endsWith(suffix) && s !== suffix)?.slice(0, -suffix.length).trim() || null;
   return { params, englishName, brand };
 }
 
@@ -330,6 +337,56 @@ function psuSpecs(p) {
 function psuSummary(specs) {
   return [specs.ratedWatts && `${specs.ratedWatts}W`, specs.efficiency, specs.modular, specs.native16Pin && '原生 16pin']
     .filter(Boolean).join(' · ');
+}
+
+/**
+ * AMD 锐龙桌面处理器的封装功耗上限 PPT = TDP × 1.35（65W → 88W，105W → 142W，170W → 230W）。
+ * Intel 没有固定换算，只在页面写明最大功耗（PL2 / 最大睿频功耗）时采用。
+ */
+function cpuPeakWatts(p, socket, tdp) {
+  const explicit = num(p['最大睿频功耗'] ?? p['最大功耗'] ?? p['PL2']);
+  if (explicit) return explicit;
+  if (tdp && /^AM\d$/.test(socket ?? '') && /AMD|锐龙|Ryzen/i.test(`${p['CPU系列'] ?? ''} ${p['产品型号'] ?? ''}`)) return Math.round(tdp * 1.35);
+  return undefined;
+}
+
+function cpuSpecs(p) {
+  const socket = socketOf(p['插槽类型'] ?? p['CPU插槽']);
+  const tdpWatts = num(p['热设计功耗(TDP)'] ?? p['热设计功耗']);
+  return {
+    socket,
+    cores: num(p['核心数量']),
+    threads: num(p['线程数量']),
+    tdpWatts,
+    maxPowerWatts: cpuPeakWatts(p, socket, tdpWatts),
+    memoryType: (p['内存类型'] ?? '').match(/DDR\d/i)?.[0].toUpperCase(),
+    packaging: p['包装形式'] || undefined,
+    integratedGraphics: p['集成显卡'] && !/无/.test(p['集成显卡']) ? p['集成显卡'] : undefined,
+  };
+}
+
+function cpuSummary(specs) {
+  return [specs.socket, specs.cores && `${specs.cores} 核`, specs.threads && `${specs.threads} 线程`,
+    specs.tdpWatts && `${specs.tdpWatts}W`, specs.packaging].filter(Boolean).join(' · ');
+}
+
+function ssdSpecs(p) {
+  const iface = p['接口类型'] ?? '';
+  const gen = (p['通道'] ?? '').match(/Gen\s*(\d)/i)?.[1];
+  const capacity = String(p['存储容量'] ?? '');
+  const tb = capacity.match(/(\d+(?:\.\d+)?)\s*TB/i);
+  return {
+    capacityGB: tb ? Math.round(Number(tb[1]) * 1000) : num(capacity),
+    interface: /M\.2/i.test(iface) ? `M.2 ${/PCIe|NVMe/i.test(iface) ? `PCIe${gen ? ` ${gen}.0` : ''}` : 'SATA'}` : iface || undefined,
+    readMBs: num(p['读取速度']),
+    writeMBs: num(p['写入速度']),
+    tbw: num((p['其它性能'] ?? '').match(/(\d+)\s*TBW/i)?.[1]),
+  };
+}
+
+function ssdSummary(specs) {
+  const cap = specs.capacityGB && (specs.capacityGB >= 1000 ? `${specs.capacityGB / 1000}TB` : `${specs.capacityGB}GB`);
+  return [cap, specs.interface, specs.readMBs && `读 ${specs.readMBs}MB/s`].filter(Boolean).join(' · ');
 }
 
 const paramUrl = id => `${ORIGIN}/${Math.ceil(Number(id) / 1000)}/${id}/param.shtml`;

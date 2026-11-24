@@ -8,7 +8,7 @@ import { Hero } from './components/Hero';
 import { PlansDialog, type PlanSummary } from './components/PlansDialog';
 import { PriceDialog, type PriceOrigin, type PriceRequest } from './components/PriceDialog';
 import { StepNav } from './components/StepNav';
-import { Summary } from './components/Summary';
+import { Summary, type PriceAlert } from './components/Summary';
 import { TopBar, type Connection } from './components/TopBar';
 import { buildReducer, totals } from './domain/build';
 import { parseQuery, type Filters } from './domain/candidates';
@@ -305,6 +305,38 @@ export default function App() {
   };
 
   const [refreshing, setRefreshing] = useState(false);
+  const [alerts, setAlerts] = useState<PriceAlert[]>([]);
+
+  // 价格提醒：已选配件对应的目录参考价有变化时提示（估算价可一键刷新；手动价只提示，不改）
+  const catalogKey = SLOT_IDS.map(id => {
+    const p = build.slots[id].part;
+    return p?.catalogId ? `${id}:${p.catalogId}:${p.priceCents}:${p.priceSource}:${build.slots[id].locked}` : '';
+  }).join('|');
+  useEffect(() => {
+    if (!online) { setAlerts([]); return; }
+    const targets = SLOT_IDS.filter(id => {
+      const p = build.slots[id].part;
+      return p?.catalogId && p.priceCents != null && p.priceSource !== 'demo';
+    });
+    if (!targets.length) { setAlerts([]); return; }
+    let alive = true;
+    (async () => {
+      const found: PriceAlert[] = [];
+      for (const id of targets) {
+        const part = build.slots[id].part!;
+        try {
+          const item = await api.catalogItem(part.catalogId!);
+          const now = item.estimatedPriceCents;
+          if (!now || now === part.priceCents) continue;
+          if (part.priceSource === 'estimate' && !build.slots[id].locked) found.push({ slot: id, label: slotDef(id).label, kind: 'estimate', fromCents: part.priceCents!, toCents: now });
+          else if (part.priceSource === 'manual' && now < part.priceCents!) found.push({ slot: id, label: slotDef(id).label, kind: 'cheaper', fromCents: part.priceCents!, toCents: now });
+        } catch { /* 目录读不到时不提醒 */ }
+      }
+      if (alive) setAlerts(found);
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, catalogKey]);
   /** 按目录最新参考价刷新估算价：手动价、锁定的配件不会被改 */
   const refreshEstimates = async () => {
     const targets = SLOT_IDS.filter(id => {
@@ -381,6 +413,7 @@ export default function App() {
               emptyHint={emptyHint}
               onRefreshEstimates={online ? refreshEstimates : undefined}
               refreshing={refreshing}
+              alerts={alerts}
             />
           </div>
         </div>

@@ -22,11 +22,22 @@ interface Props {
   /** 刷新估算价（在线且有估算价时显示） */
   onRefreshEstimates?: () => void;
   refreshing?: boolean;
+  /** 价格提醒：已选配件的目录参考价与方案里的价格不同 */
+  alerts?: PriceAlert[];
+}
+
+export interface PriceAlert {
+  slot: SlotId;
+  label: string;
+  /** estimate：估算价可刷新；cheaper：手动价高于当前参考价 */
+  kind: 'estimate' | 'cheaper';
+  fromCents: number;
+  toCents: number;
 }
 
 const priceText = (c: number | null) => (c == null ? '未知' : formatYuan(c));
 
-export function Summary({ build, totals: t, active, onSelect, onToggleLock, onEditPrice, onRemoveCustom, onSave, saving, saveStatus, emptyHint, onRefreshEstimates, refreshing }: Props) {
+export function Summary({ build, totals: t, active, onSelect, onToggleLock, onEditPrice, onRemoveCustom, onSave, saving, saveStatus, emptyHint, onRefreshEstimates, refreshing, alerts = [] }: Props) {
   const over = t.remainingCents < 0;
   const priceLabel = t.estimateCount > 0 ? `含 ${t.estimateCount} 件估算` : t.demoPriceCount > 0 ? '含演示价' : '手动价';
   return (
@@ -99,6 +110,27 @@ export function Summary({ build, totals: t, active, onSelect, onToggleLock, onEd
           </li>
         ))}
       </ul>
+
+      {alerts.length > 0 && (
+        <div className="price-alerts" role="status">
+          <strong>价格提醒</strong>
+          <ul>
+            {alerts.map(a => (
+              <li key={a.slot}>
+                <button type="button" className="link-btn" onClick={() => onSelect(a.slot)}>{a.label}</button>
+                {a.kind === 'estimate'
+                  ? <> 参考价 {a.toCents < a.fromCents ? '降' : '涨'}了 {formatYuan(Math.abs(a.toCents - a.fromCents))}（{formatYuan(a.fromCents)} → {formatYuan(a.toCents)}）</>
+                  : <> 参考价 {formatYuan(a.toCents)}，比你填的低 {formatYuan(a.fromCents - a.toCents)}</>}
+              </li>
+            ))}
+          </ul>
+          {alerts.some(a => a.kind === 'estimate') && onRefreshEstimates && (
+            <button type="button" className="btn btn-link btn-sm" onClick={onRefreshEstimates} disabled={refreshing}>
+              {refreshing ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} 按最新参考价更新估算
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="totals">
         <div className="total-line">

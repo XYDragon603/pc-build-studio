@@ -201,3 +201,23 @@ test('估算价：有参考价用参考价，显卡缺价时用同芯片同显�
   build.slots.find(slot => slot.id === 'GPU').part.priceSource = 'guess';
   assert.equal((await request('/builds/' + build.id, 'PUT', build)).data.error.code, 'INVALID_INPUT');
 });
+
+test('价格走势：读取参考价历史，给出最近一次变价与最低价', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'pc-catalog-trend-'));
+  t.after(async () => {
+    for (const file of await readdir(directory)) await unlink(join(directory, file));
+    await rmdir(directory);
+  });
+  const item = { id: 'zol-9', category: 'GPU', name: 'x', manufacturer: 'Colorful', mpn: null, partNumbers: [], summary: '', aliases: [],
+    imageUrl: null, sourceUrl: 'https://detail.zol.com.cn/1/9/param.shtml', dataSource: 'zol', specs: {}, referencePriceCents: 389900 };
+  await writeFile(join(directory, 'zol-catalog.json'), JSON.stringify({ items: [item], attribution: { name: 'z' } }));
+  await writeFile(join(directory, 'zol-price-history.jsonl'), [
+    { id: 'zol-9', cents: 419900, previousCents: 419900, at: '2026-11-17T00:00:00.000Z' },
+    { id: 'zol-9', cents: 379900, previousCents: 419900, at: '2026-11-20T00:00:00.000Z' },
+    { id: 'zol-9', cents: 389900, previousCents: 379900, at: '2026-11-24T00:00:00.000Z' },
+  ].map(e => JSON.stringify(e)).join('\n') + '\nnot json\n');
+  const request = await listen(t, directory);
+  const { data } = await request('/catalog/zol-9');
+  assert.deepEqual(data.priceTrend, { previousCents: 379900, changedAt: '2026-11-24T00:00:00.000Z', lowestCents: 379900,
+    since: '2026-11-17T00:00:00.000Z', points: 3 });
+});

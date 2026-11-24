@@ -27,6 +27,22 @@ function sourceLine(c: Candidate) {
   return `${c.storeLabel} · ${c.source === 'replay' ? '回放记录' : '实时检索'}${when ? ` · ${when} 观察` : ''}`;
 }
 
+/** 比上次变价多少、是否高于记录到的最低价 */
+function TrendLine({ current, trend }: { current: number; trend: NonNullable<Candidate['priceTrend']> }) {
+  const diff = trend.previousCents != null ? current - trend.previousCents : 0;
+  if (!diff && trend.lowestCents >= current) return null;
+  return (
+    <p className="trend-line">
+      {diff !== 0 && (
+        <span className={diff < 0 ? 'down' : 'up'} title={`上次 ${formatYuan(trend.previousCents!)}${trend.changedAt ? `，${formatObserved(trend.changedAt)} 变价` : ''}`}>
+          {diff < 0 ? '↓' : '↑'} {formatYuan(Math.abs(diff))} 较上次
+        </span>
+      )}
+      {trend.lowestCents < current && <span className="muted">记录最低 {formatYuan(trend.lowestCents)}</span>}
+    </p>
+  );
+}
+
 export function CandidateCard({ candidate: c, verifiedCents, inBuild, slotLocked, slotFilled, onAdd, onAddEstimate, onRemove, onVerify }: Props) {
   const price = verifiedCents ?? (c.state === 'confirmed' ? c.priceCents : null);
   const confirmed = price != null;
@@ -59,6 +75,7 @@ export function CandidateCard({ candidate: c, verifiedCents, inBuild, slotLocked
               : <>同芯片 {c.estimate.samples} 款中位价 约 {formatYuan(c.estimate.cents)}</>}
           </p>
         )}
+        {!confirmed && c.estimate?.basis === 'reference' && c.priceTrend && <TrendLine current={c.estimate.cents} trend={c.priceTrend} />}
         {!confirmed && c.referenceCents != null && (
           <p className="muted small">{c.source === 'catalog' ? 'ZOL 参考价' : '页面标价'} {formatYuan(c.referenceCents)} · 未计入</p>
         )}

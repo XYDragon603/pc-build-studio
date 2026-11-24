@@ -27,6 +27,8 @@ export function catalogSpecs(slot: SlotId, specs: CatalogItem['specs']): PartSpe
   const socket = s(specs.socket);
   const memoryType = s(specs.memoryType);
   if (socket && (slot === 'cpu' || slot === 'board')) out.socket = socket.toUpperCase();
+  // CPU 只用明确的峰值功耗（ZOL 导入时按 AMD PPT 规则或页面最大功耗算出），不把 TDP 当峰值
+  if (slot === 'cpu') out.maxPowerWatts = up(specs.maxPowerWatts);
   if (memoryType && (slot === 'board' || slot === 'ram')) out.memoryType = memoryType.toUpperCase();
   if (slot === 'gpu') {
     out.lengthMm = up(specs.lengthMm);
@@ -68,6 +70,7 @@ export function catalogToCandidate(item: CatalogItem, slot: SlotId): Candidate {
     estimate: item.estimatedPriceCents && item.estimateBasis
       ? { cents: item.estimatedPriceCents, basis: item.estimateBasis, samples: item.estimateSamples ?? 1, observedAt: item.priceObservedAt ?? null }
       : undefined,
+    priceTrend: item.priceTrend,
     state: 'missing',
     url,
     imageUrl: item.imageUrl,

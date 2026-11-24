@@ -81,6 +81,45 @@ function addZol(items, zolItems) {
 
 const brief = ({ rawParams, ...item }) => item;
 
+/** 读取 ZOL 参考价历史（import-zol.mjs --prices 追加），按目录 ID 分组 */
+function readPriceHistory(directory) {
+  const byId = new Map();
+  if (directory === null) return byId;
+  let text = '';
+  try { text = readFileSync(join(directory, 'zol-price-history.jsonl'), 'utf8'); }
+  catch (error) { if (error.code === 'ENOENT') return byId; throw error; }
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (typeof entry.id === 'string' && Number.isSafeInteger(entry.cents)) byId.set(entry.id, [...(byId.get(entry.id) ?? []), entry]);
+    } catch { /* 跳过损坏的行 */ }
+  }
+  return byId;
+}
+
+/** 价格走势：最近一次变价（之前的价格与时间）和记录到的最低价 */
+function addTrends(items, history) {
+  if (!history.size) return items;
+  return items.map(item => {
+    const entries = history.get(item.zolId ?? item.id);
+    if (!entries?.length || !item.referencePriceCents) return item;
+    const sorted = [...entries].sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    const change = [...sorted].reverse().find(e => Number.isSafeInteger(e.previousCents) && e.previousCents !== e.cents);
+    const lowestCents = Math.min(item.referencePriceCents, ...sorted.map(e => e.cents));
+    return {
+      ...item,
+      priceTrend: {
+        previousCents: change?.previousCents ?? null,
+        changedAt: change?.at ?? null,
+        lowestCents,
+        since: sorted[0].at,
+        points: sorted.length,
+      },
+    };
+  });
+}
+
 const median = values => {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -123,7 +162,7 @@ function pagination(value, fallback, min, max, field) {
 export function createCatalog(directory = '.runtime') {
   const imported = readImported(directory);
   const zol = readImported(directory, 'zol-catalog.json');
-  const items = addEstimates(addZol(mergeCatalog(imported.items), zol.items));
+  const items = addTrends(addEstimates(addZol(mergeCatalog(imported.items), zol.items)), readPriceHistory(directory));
   const attributions = [imported.attribution, zol.attribution].filter(Boolean);
   const byId = new Map(items.map(item => [item.id, item]));
   const searchIndex = items.map(item => ({ item,

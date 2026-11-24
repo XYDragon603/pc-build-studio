@@ -107,6 +107,7 @@ describe('型号目录转候选', () => {
     expect(box.specs).toEqual({ maxGpuLengthMm: 330, maxCoolerHeightMm: 165 });
     const cpu = catalogToCandidate(item('CPU', { socket: 'am5', tdpWatts: 65 }), 'cpu');
     expect(cpu.specs).toEqual({ socket: 'AM5' });
+    expect(catalogToCandidate(item('CPU', { socket: 'AM5', tdpWatts: 65, maxPowerWatts: 88 }), 'cpu').specs).toEqual({ socket: 'AM5', maxPowerWatts: 88 });
   });
 
   it('只有显卡建议电源时按建议值判断，与后端一致', () => {

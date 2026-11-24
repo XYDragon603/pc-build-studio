@@ -118,6 +118,16 @@ export interface CatalogItem {
   estimatedPriceCents?: number;
   estimateBasis?: 'reference' | 'chip-median';
   estimateSamples?: number;
+  /** 参考价走势：最近一次变价与记录到的最低价 */
+  priceTrend?: PriceTrend;
+}
+
+export interface PriceTrend {
+  previousCents: number | null;
+  changedAt: string | null;
+  lowestCents: number;
+  since: string;
+  points: number;
 }
 
 export interface CatalogPage {
