@@ -299,3 +299,10 @@
 /* 价格说明与疑似旧价 */
 .nx-price-note { flex: none; margin: 0; padding: 8px 14px 10px; font-size: 12px; line-height: 1.5; color: var(--ink-2); border-top: 1px solid var(--line); }
 .nx-stale { display: block; font-size: 11px; font-weight: 600; color: var(--amber, #a86200); }
+
+/* 打开存档时参考价有变动 */
+.nx-price-changes { flex: none; display: flex; align-items: center; gap: 10px; margin: 0 12px 8px; padding: 8px 12px; border-radius: 8px;
+  background: var(--amber-bg, #fff6e5); color: var(--ink); font-size: 13px; line-height: 1.45; }
+.nx-price-changes > svg { flex: none; color: var(--amber, #a86200); }
+.nx-price-changes > span { flex: 1; min-width: 0; }
+.nx-price-changes .nx-btn { flex: none; height: 32px; padding: 0 12px; font-size: 13px; }

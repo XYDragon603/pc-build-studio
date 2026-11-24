@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { api, type CatalogItem, type EstimateBasis } from '../api/client';
 import { estimatePower } from '../domain/compat';
 import { isIntegratedGpu, STOCK_COOLER_NAME } from '../domain/plan';
+import { SLOTS } from '../domain/slots';
 import type { Build, SlotId } from '../domain/types';
 
 export type SortKey = 'value' | 'price' | '-price' | 'perf';
@@ -14,6 +15,22 @@ export const ESTIMATE_LABELS: Record<EstimateBasis, string> = {
 
 export const PRICE_NOTE = '参考价来自中关村在线，不是实时价格；内存、固态近期涨价快，下单前以电商实际售价为准，填进“实付价”后合计按实付计算。';
 export const STALE_NOTE = '这款的 ZOL 参考价明显低于同规格其他型号，可能是涨价前的旧价，已按同规格中位价估算，自动方案不会选它';
+
+export interface PriceChange { slot: SlotId; label: string; name: string; fromCents: number; toCents: number }
+
+/**
+ * 存档里按参考价记的配件，与配件库当前估算价不一致的（参考价每周更新两次）。
+ * 手动填的实付价、锁定的配件不算，和 setEstimate 的规则一致。
+ */
+export function priceChanges(build: Build, items: Record<string, CatalogItem | null | undefined>): PriceChange[] {
+  return SLOTS.flatMap(({ id, label }) => {
+    const { part, locked } = build.slots[id];
+    const item = part?.catalogId ? items[part.catalogId] : null;
+    const toCents = item?.estimatedPriceCents;
+    if (locked || !part || part.priceSource !== 'estimate' || part.priceCents == null || !toCents || toCents === part.priceCents) return [];
+    return [{ slot: id, label, name: part.name, fromCents: part.priceCents, toCents }];
+  });
+}
 
 /** 列表里的价格文字：粗估加“≈”，系列起价加“起” */
 export function estimateText(item: Pick<CatalogItem, 'estimatedPriceCents' | 'estimateBasis'>, format: (c: number) => string): string {

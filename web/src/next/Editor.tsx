@@ -1,4 +1,4 @@
-import { AlertTriangle, BadgeCheck, CheckCircle2, CircleDollarSign, Download, Gamepad2, Loader2, Lock, Pencil, PieChart, Repeat, Save, Trash2, VolumeX, Wallet, XCircle } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, RefreshCw, CheckCircle2, CircleDollarSign, Download, Gamepad2, Loader2, Lock, Pencil, PieChart, Repeat, Save, Trash2, VolumeX, Wallet, XCircle } from 'lucide-react';
 import { useMemo, type Dispatch, type ReactNode } from 'react';
 import { SLOT_ICONS } from '../components/icons';
 import { totals, type BuildAction } from '../domain/build';
@@ -7,7 +7,7 @@ import { formatYuan } from '../domain/money';
 import { buildChecks, compatSummary, INTEGRATED_GPU_NAME, STOCK_COOLER_NAME } from '../domain/plan';
 import { SLOTS } from '../domain/slots';
 import type { Build, SlotId } from '../domain/types';
-import { ESTIMATE_LABELS, PRICE_NOTE, STALE_NOTE, useCatalogItems } from './data';
+import { ESTIMATE_LABELS, PRICE_NOTE, priceChanges, STALE_NOTE, useCatalogItems } from './data';
 import { Thumb } from './Thumb';
 
 interface Props {
@@ -44,6 +44,10 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
   const bios = checks.find(c => c.id === 'bios');
   const items = useCatalogItems(SLOTS.map(s => build.slots[s.id].part?.catalogId));
   const power = estimatePower(build);
+  // 参考价有更新的配件（只看按参考价记的，手填实付价不动）
+  const changes = priceChanges(build, items);
+  const changeTotal = changes.reduce((sum, c) => sum + (c.toCents - c.fromCents) * (build.slots[c.slot].part?.quantity ?? 1), 0);
+  const applyChanges = () => changes.forEach(c => dispatch({ type: 'setEstimate', slot: c.slot, priceCents: c.toCents, note: '按最新参考价更新' }));
   // CPU / 显卡的功耗有一项是按同类估算的，就在功耗旁注明
   const powerEstimated = (['cpu', 'gpu'] as const).some(id => {
     const catalogId = build.slots[id].part?.catalogId;
@@ -69,6 +73,16 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
       <div className="nx-editor-content">
         <section className="nx-panel nx-build-panel" aria-labelledby="nx-build-heading">
           <header className="nx-section-head"><h2 id="nx-build-heading">配置清单</h2><span className="nx-muted">已选 {t.filled} / {t.slotCount} 项</span></header>
+          {changes.length > 0 && (
+            <div className="nx-price-changes" role="status">
+              <RefreshCw size={16} aria-hidden />
+              <span>
+                <strong>{changes.length} 件参考价有变动</strong>（合计 {changeTotal > 0 ? '+' : '−'}{formatYuan(Math.abs(changeTotal))}）：
+                {changes.map(c => `${c.label} ${formatYuan(c.fromCents)} → ${formatYuan(c.toCents)}`).join('、')}
+              </span>
+              <button type="button" className="nx-btn nx-btn-outline" onClick={applyChanges}>全部更新</button>
+            </div>
+          )}
           <div className="nx-table-scroll">
             <table className="nx-build-table" aria-label="当前方案配件">
               <thead><tr><th scope="col">配件</th><th scope="col">产品与规格</th><th scope="col" title={PRICE_NOTE}>参考价</th><th scope="col">实付价</th><th scope="col"><span className="sr-only">操作</span></th></tr></thead>
