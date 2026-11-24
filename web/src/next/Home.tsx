@@ -119,17 +119,25 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
         {error && <p className="nx-error" role="alert">{error}</p>}
       </section>
 
-      {plans && (
-        <section className="nx-plans">
-          <div className="nx-plans-head">
-            <h2>给 {formatYuan(budgetYuan * 100)} 的 {plans.length} 套方案</h2>
-            <p>价格为中关村在线参考价估算，通常略高于电商实际售价；选中后可以逐件替换、改成实付价。</p>
+      <section className="nx-plans">
+        {plans ? (
+          <>
+            <div className="nx-plans-head">
+              <h2>给 {formatYuan(budgetYuan * 100)} 的 {plans.length} 套方案</h2>
+              <p>价格为中关村在线参考价估算，通常略高于电商实际售价；选中后可以逐件替换、改成实付价。</p>
+            </div>
+            <div className={`nx-plan-grid n${plans.length}`}>
+              {plans.map(p => <PlanCard key={p.id} plan={p} budgetCents={budgetYuan * 100} scenarios={scenariosOf(purpose, quiet)} onChoose={() => onChoose(p)} />)}
+            </div>
+          </>
+        ) : (
+          <div className="nx-plans-empty">
+            {loading ? <Loader2 className="spin" size={36} /> : <Sparkles size={36} />}
+            <strong>{loading ? '正在挑配件…' : '填好预算和用途，点“出方案”'}</strong>
+            <span className="nx-muted">会给出省钱版、推荐版、进阶版三套，选一套后还能逐件调整。</span>
           </div>
-          <div className={`nx-plan-grid n${plans.length}`}>
-            {plans.map(p => <PlanCard key={p.id} plan={p} budgetCents={budgetYuan * 100} scenarios={scenariosOf(purpose, quiet)} onChoose={() => onChoose(p)} />)}
-          </div>
-        </section>
-      )}
+        )}
+      </section>
     </div>
   );
 }

@@ -48,7 +48,7 @@ export function Editor({ build, dispatch, onBack, onPick, onEditPrice, onSave, s
             const perf = item?.performance;
             return (
               <li key={id} className={`nx-row${part ? '' : ' empty'}`}>
-                <Thumb src={item?.imageUrl} slot={id} size="lg" />
+                <Thumb src={item?.imageUrl} slot={id} size="md" />
                 <div className="nx-row-body">
                   <span className="nx-slot">{label}</span>
                   {part ? (
