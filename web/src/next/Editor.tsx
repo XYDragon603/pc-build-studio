@@ -1,5 +1,5 @@
 import { AlertTriangle, BadgeCheck, RefreshCw, CheckCircle2, CircleDollarSign, Download, Gamepad2, Loader2, Lock, Pencil, PieChart, Repeat, Save, Trash2, VolumeX, Wallet, XCircle } from 'lucide-react';
-import { useMemo, type Dispatch, type ReactNode } from 'react';
+import { useEffect, useMemo, type Dispatch, type ReactNode } from 'react';
 import { SLOT_ICONS } from '../components/icons';
 import { totals, type BuildAction } from '../domain/build';
 import { estimatePower, type Check } from '../domain/compat';
@@ -7,7 +7,7 @@ import { formatYuan } from '../domain/money';
 import { buildChecks, compatSummary, INTEGRATED_GPU_NAME, STOCK_COOLER_NAME } from '../domain/plan';
 import { SLOTS } from '../domain/slots';
 import type { Build, SlotId } from '../domain/types';
-import { ESTIMATE_LABELS, PRICE_NOTE, priceChanges, STALE_NOTE, useCatalogItems } from './data';
+import { ESTIMATE_LABELS, PRICE_NOTE, priceChanges, STALE_NOTE, staleSpecs, useCatalogItems } from './data';
 import { Thumb } from './Thumb';
 
 interface Props {
@@ -44,6 +44,10 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
   const bios = checks.find(c => c.id === 'bios');
   const items = useCatalogItems(SLOTS.map(s => build.slots[s.id].part?.catalogId));
   const power = estimatePower(build);
+  // 打开方案时自动用配件库最新规格补全（规格不是用户填的，直接更新；价格要用户确认，见下）
+  useEffect(() => {
+    for (const { slot, specs } of staleSpecs(build, items)) dispatch({ type: 'refreshSpecs', slot, specs });
+  }, [build, items, dispatch]);
   // 参考价有更新的配件（只看按参考价记的，手填实付价不动）
   const changes = priceChanges(build, items);
   const changeTotal = changes.reduce((sum, c) => sum + (c.toCents - c.fromCents) * (build.slots[c.slot].part?.quantity ?? 1), 0);

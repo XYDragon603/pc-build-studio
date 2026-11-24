@@ -1,6 +1,6 @@
 import { partFromCandidate } from './demoData';
 import { SLOTS } from './slots';
-import type { Build, Candidate, CustomPart, Part, SlotId } from './types';
+import type { Build, Candidate, CustomPart, Part, PartSpecs, SlotId } from './types';
 
 export type BuildAction =
   | { type: 'setBudget'; cents: number }
@@ -12,6 +12,8 @@ export type BuildAction =
   | { type: 'setPartPrice'; slot: SlotId; priceCents: number | null }
   /** 刷新估算价：只改仍为估算价、未锁定的配件 */
   | { type: 'setEstimate'; slot: SlotId; priceCents: number; note: string }
+  /** 用配件库最新规格补全 / 更新存档里的规格（如后来补的功耗）；没有新值的字段保留原值 */
+  | { type: 'refreshSpecs'; slot: SlotId; specs: PartSpecs }
   | { type: 'addCustom'; part: CustomPart }
   | { type: 'removeCustom'; id: string }
   | { type: 'markSaved'; serverId: string; version: number; updatedAt: string }
@@ -55,6 +57,13 @@ export function buildReducer(b: Build, a: BuildAction): Build {
       return updateSlot(b, a.slot, s =>
         s.locked || s.part?.priceSource !== 'estimate' || s.part.priceCents === a.priceCents
           ? s : { ...s, part: { ...s.part, priceCents: a.priceCents, note: a.note } });
+    case 'refreshSpecs':
+      return updateSlot(b, a.slot, s => {
+        if (!s.part) return s;
+        const specs = { ...s.part.specs, ...a.specs };
+        const same = Object.keys(specs).every(k => specs[k as keyof PartSpecs] === s.part!.specs[k as keyof PartSpecs]);
+        return same ? s : { ...s, part: { ...s.part, specs } };
+      });
     case 'addCustom':
       return touch({ ...b, custom: [...b.custom, a.part] });
     case 'removeCustom':

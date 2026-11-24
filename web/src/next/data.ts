@@ -3,8 +3,9 @@ import { useEffect, useState } from 'react';
 import { api, type CatalogItem, type EstimateBasis } from '../api/client';
 import { estimatePower } from '../domain/compat';
 import { isIntegratedGpu, STOCK_COOLER_NAME } from '../domain/plan';
+import { catalogSpecs } from '../domain/catalog';
 import { SLOTS } from '../domain/slots';
-import type { Build, SlotId } from '../domain/types';
+import type { Build, PartSpecs, SlotId } from '../domain/types';
 
 export type SortKey = 'value' | 'price' | '-price' | 'perf';
 export type Market = 'cn' | 'global';
@@ -29,6 +30,18 @@ export function priceChanges(build: Build, items: Record<string, CatalogItem | n
     const toCents = item?.estimatedPriceCents;
     if (locked || !part || part.priceSource !== 'estimate' || part.priceCents == null || !toCents || toCents === part.priceCents) return [];
     return [{ slot: id, label, name: part.name, fromCents: part.priceCents, toCents }];
+  });
+}
+
+/** 存档里规格落后于配件库的配件（如后来补的功耗、尺寸），返回要合并进去的新规格 */
+export function staleSpecs(build: Build, items: Record<string, CatalogItem | null | undefined>): { slot: SlotId; specs: PartSpecs }[] {
+  return SLOTS.flatMap(({ id }) => {
+    const part = build.slots[id].part;
+    const item = part?.catalogId ? items[part.catalogId] : null;
+    if (!part || !item) return [];
+    const fresh = catalogSpecs(id, item.specs);
+    const changed = (Object.keys(fresh) as (keyof PartSpecs)[]).some(k => fresh[k] !== part.specs[k]);
+    return changed ? [{ slot: id, specs: fresh }] : [];
   });
 }
 
