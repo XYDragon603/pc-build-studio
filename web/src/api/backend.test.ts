@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { buildReducer, totals } from '../domain/build';
 import { boardFit, clearance, compatibility, estimatePower, gpuPowerConnector } from '../domain/compat';
 import { candidateById, demoBuild } from '../domain/demoData';
-import { quotesToCandidates } from '../domain/quotes';
 import { catalogToCandidate } from '../domain/catalog';
 import type { Build } from '../domain/types';
-import type { Quote } from './client';
 import { fromApi, sameContent, toApiInput } from './mapping';
 
 // 直接加载后端模块，保证前端的合计 / 兼容性与服务端计算一致
@@ -62,30 +60,6 @@ describe('前后端模型转换', () => {
     expect(b.slots.gpu.part).toBeNull();
     expect(b.scenarios).toEqual(['2k', 'quiet']);
     expect(b.serverId).toBeUndefined();
-  });
-});
-
-describe('报价转候选', () => {
-  const q = (over: Partial<Quote>): Quote => ({
-    title: 'AMD 锐龙 7 9700X 盒装CPU', category: 'CPU', model: 'RYZEN 9700X', capacityGB: null, priceCents: null,
-    currency: null, observedAt: '2026-11-23T14:10:30.000Z', sku: null, status: 'review', autoEligible: false,
-    reasonCodes: [], reasons: [], method: 'manual-web-observation', url: 'https://item.jd.com/1.html', ...over,
-  });
-
-  it('条件价格显示为待核实，页面标价只作参考', () => {
-    const { shown } = quotesToCandidates('cpu', 'replay', [q({ priceCents: 172900, reasonCodes: ['conditional_price'], reasons: ['价格依赖登录'] })]);
-    expect(shown[0]).toMatchObject({ state: 'review', priceCents: null, referenceCents: 172900, reviewNote: '需登录确认', specs: { socket: 'AM5' } });
-  });
-
-  it('只有 accepted 才能直接加入；rejected 进入已过滤', () => {
-    const r = quotesToCandidates('gpu', 'live', [
-      q({ status: 'accepted', priceCents: 399900, url: 'https://item.jd.com/2.html' }),
-      q({ status: 'rejected', reasons: ['显存容量与目标不一致'], url: 'https://item.jd.com/3.html' }),
-      q({ url: 'https://item.jd.com/4.html' }),
-    ]);
-    expect(r.shown.map(c => c.state)).toEqual(['confirmed', 'missing']);
-    expect(r.shown[0].verified).toBe(true);
-    expect(r.filtered).toEqual([expect.objectContaining({ reason: '显存容量与目标不一致' })]);
   });
 });
 

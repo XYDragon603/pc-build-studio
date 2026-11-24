@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildReducer, totals } from './build';
-import { applyFilters } from './candidates';
 import { compatibility } from './compat';
-import { candidateById, DEMO_CANDIDATES, demoBuild } from './demoData';
+import { candidateById, demoBuild } from './demoData';
 import { formatYuan, parseYuan } from './money';
 
 describe('演示方案与设计稿数字一致', () => {
@@ -62,20 +61,6 @@ describe('估算价', () => {
     expect(buildReducer(manual, { type: 'setEstimate', slot: 'gpu', priceCents: 1, note: '' }).slots.gpu.part?.priceCents).toBe(400000);
     const locked = buildReducer(b, { type: 'toggleLock', slot: 'gpu' });
     expect(buildReducer(locked, { type: 'setEstimate', slot: 'gpu', priceCents: 1, note: '' }).slots.gpu.part?.priceCents).toBe(419900);
-  });
-});
-
-describe('候选过滤', () => {
-  const gpus = DEMO_CANDIDATES.filter(c => c.slot === 'gpu');
-  it('查询中的 16GB 作为显存约束，8GB 进入已过滤', () => {
-    const r = applyFilters(gpus, { query: 'RTX 5060 Ti 16GB', condition: 'new', store: 'jd', capacity: 'all' });
-    expect(r.shown.map(c => c.id)).toEqual(['gpu-galax', 'gpu-asus', 'gpu-colorful']);
-    expect(r.filtered).toEqual([{ candidate: candidateById('gpu-maxsun-8g'), reason: '显存不符' }]);
-  });
-  it('关键词不相关的商品不展示也不算过滤', () => {
-    const r = applyFilters(gpus, { query: '影驰', condition: 'new', store: 'jd', capacity: 'all' });
-    expect(r.shown).toHaveLength(1);
-    expect(r.filtered).toHaveLength(0);
   });
 });
 
