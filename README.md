@@ -41,6 +41,17 @@ npm run web:test   # 前端测试，含与后端 calculateBuild 的一致性检�
 
 连上 API 后：CPU / 显卡调用 `/quotes/search`（默认回放，配置密钥后可切实时），方案保存到 `.runtime/builds.json` 并带版本号。主板等其余配件暂为演示数据。API 未启动时整页退回演示模式，方案存在浏览器 localStorage。
 
+## 桌面程序
+
+`desktop/` 是 Electron 外壳：程序内启动本地服务（随机端口，只监听本机）并用独立窗口打开界面，关窗口即退出。它直接读取项目目录的代码与数据，代码或数据更新后无需重新打包；前端改动需要重新构建。
+
+```powershell
+npm --prefix desktop install          # 首次；若 Electron 二进制未下载：node desktop/node_modules/electron/install.js
+npm run desktop:pack                  # 构建前端并打包到 desktop/out/PCBuilder-win32-x64/PCBuilder.exe
+```
+
+桌面快捷方式“装机工作台”指向上面的 exe。从 VS Code 终端调试时注意环境变量 `ELECTRON_RUN_AS_NODE`，需先清除，否则 Electron 会以普通 Node 方式运行。
+
 ## 国内型号补充（中关村在线，个人使用）
 
 ```powershell

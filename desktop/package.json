@@ -1,0 +1,17 @@
+{
+  "name": "pc-builder-desktop",
+  "productName": "装机工作台",
+  "version": "0.1.0",
+  "private": true,
+  "description": "装机工作台桌面程序（Electron 外壳，读取上级目录的项目代码与数据）",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "icon": "electron scripts/make-icon.js",
+    "pack": "node scripts/pack.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^45.4.1"
+  }
+}

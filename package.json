@@ -18,6 +18,8 @@
     "probe": "node scripts/probe-pages.mjs",
     "search": "node --env-file-if-exists=.env src/cli.mjs",
     "web": "npm --prefix web run dev",
-    "web:test": "npm --prefix web test"
+    "web:test": "npm --prefix web test",
+    "desktop": "npm --prefix desktop start",
+    "desktop:pack": "npm --prefix web run build && npm --prefix desktop run pack"
   }
 }

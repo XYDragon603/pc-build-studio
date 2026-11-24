@@ -2,3 +2,5 @@
 .runtime/
 node_modules/
 dist/
+desktop/out/
+desktop/app-config.json
