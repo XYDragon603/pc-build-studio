@@ -418,6 +418,22 @@ test('缺功耗时估算：显卡取同芯片 TDP 中位数，AMD 按 PPT，Inte
   assert.deepEqual([own.specs.maxPowerWatts, own.estimatedSpecs], [88, undefined]);
 });
 
+test('笔记本 CPU、手机存储芯片不进目录；服务器 / 工作站 CPU 标注出来', async t => {
+  const cpu = (id, name) => ({ id, name, category: 'CPU', specs: {}, referencePriceCents: 100000 });
+  const request = await estimateFixture(t, [
+    cpu('zol-h', 'Intel 酷睿 i7 13700H'), cpu('zol-hx', 'Intel 酷睿 i5 14500HX'), cpu('zol-p', 'Intel 酷睿 i7 1360P'),
+    cpu('zol-u', 'Intel 酷睿 i5 1334U'), cpu('zol-amd-h', 'AMD Ryzen 7 7735H'), cpu('zol-ultra-h', 'Intel Core Ultra 7 155H'),
+    cpu('zol-desk', 'Intel 酷睿 i7 13700'), cpu('zol-old-p', 'Intel Core i5 6402P'), cpu('zol-ks', 'Intel 酷睿 i9 13900KS'),
+    cpu('zol-tr', 'AMD Ryzen Threadripper 7980X'),
+    { id: 'zol-ufs', name: '长江存储UC341', category: 'SSD', specs: { interface: 'UFS3.1', capacityGB: 256 }, referencePriceCents: 20000 },
+  ], []);
+  const ids = async category => (await request(`/catalog?category=${category}&limit=100`)).data.items.map(i => i.id).filter(id => id.startsWith('zol-')).sort();
+  assert.deepEqual(await ids('CPU'), ['zol-desk', 'zol-ks', 'zol-old-p', 'zol-tr']);
+  assert.deepEqual(await ids('SSD'), []);
+  assert.equal((await request('/catalog/zol-tr')).data.workstation, true);
+  assert.equal((await request('/catalog/zol-desk')).data.workstation, undefined);
+});
+
 test('输入联想：模糊匹配型号、中英文品牌互通，按匹配度排序', async t => {
   const part = (id, name, extra = {}) => ({ id, name, category: 'GPU', specs: {}, referencePriceCents: 300000, ...extra });
   const request = await estimateFixture(t, [

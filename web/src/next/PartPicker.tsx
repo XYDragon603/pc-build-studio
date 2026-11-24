@@ -136,6 +136,7 @@ export function PartPicker({ slot, build, onClose, onPick, onIntegrated, onCateg
                   <span className="nx-pick-value">
                     <strong title={item.estimateBasis ? ESTIMATE_LABELS[item.estimateBasis] : undefined}>{priceText(item)}</strong>
                     {isCurrent ? <small className="nx-tag">当前选择</small> : change ? <small className={`nx-tag ${change > 0 ? 'warn' : 'ok'}`}>{change > 0 ? '+ ' : '省 '}{formatYuan(Math.abs(change))}</small> : null}
+                    {item.workstation && <small className="nx-tag warn" title="服务器 / 工作站平台，需要专用主板，自动方案不会选">工作站/服务器</small>}
                     {item.possiblyStale && <small className="nx-tag warn" title={`${STALE_NOTE}（ZOL 参考价 ${item.referencePriceCents ? formatYuan(item.referencePriceCents) : '—'}）`}>可能是旧价</small>}
                     {item.compatibility === 'unknown' && <small className="nx-tag warn">规格待核对</small>}
                     {item.compatibility === 'conflict' && <small className="nx-tag error">规格冲突</small>}

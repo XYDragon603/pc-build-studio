@@ -77,8 +77,8 @@ async function serveStatic(staticDir, pathname, response) {
   response.end(body);
 }
 
-/** 自动配置只用较可靠的价格：系列起价、同类粗估、疑似旧价不参与 */
-const forPlans = item => item.market === 'cn' && !item.possiblyStale
+/** 自动配置只用较可靠的价格：系列起价、同类粗估、疑似旧价不参与；服务器 / 工作站 CPU 也不选 */
+const forPlans = item => item.market === 'cn' && !item.possiblyStale && !item.workstation
   && item.estimateBasis !== 'series-low' && item.estimateBasis !== 'class-median';
 
 export function createApiServer({ directory, catalogDirectory = directory, staticDir = null,

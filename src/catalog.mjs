@@ -393,6 +393,22 @@ function addPowerEstimates(items) {
   });
 }
 
+/** 装不到台式机上的条目：笔记本 CPU（H / HK / HX / U / P 等后缀）、手机 / 嵌入式存储（UFS、eMMC） */
+export function notForDesktop(item) {
+  const name = String(item.name ?? '').normalize('NFKC');
+  if (item.category === 'CPU') {
+    // P 后缀只认 12/13 代笔记本的“1260P / 1360P”这种 4 位 1 开头型号；老台式机 i5-6402P 是核显缩水版，不是笔记本
+    return /\bi[3579][\s-]*(\d{4,5}(H|HK|HX|HS|U)|1\d{3}P)\b/i.test(name)
+      || /(ryzen|锐龙)\s*[3579]\s*(pro\s*)?\d{4}(H|HS|HX|U)\b/i.test(name)
+      || /ultra\s*[3579]\s*\d{3}(H|HX|U|V)\b/i.test(name);
+  }
+  if (item.category === 'SSD') return /\b(UFS|eMMC)/i.test(`${item.specs?.interface ?? ''} ${name}`);
+  return false;
+}
+
+/** 服务器 / 工作站 / 龙芯 CPU：能搜到，但自动方案不选，界面标注 */
+const WORKSTATION_CPU = /xeon|至强|threadripper|epyc|霄龙|龙芯|loongson/i;
+
 /** 中英文品牌名互通：搜“华硕”能找到 ASUS，反之亦然 */
 const BRAND_ALIASES = [
   ['asus', '华硕'], ['msi', '微星'], ['gigabyte', '技嘉'], ['asrock', '华擎'], ['colorful', '七彩虹'], ['galax', '影驰'], ['zotac', '索泰'],
@@ -463,7 +479,9 @@ export function createCatalog(directory = '.runtime') {
   const imported = readImported(directory);
   const zol = readImported(directory, 'zol-catalog.json');
   const performance = loadPerformance(directory);
-  const items = addImages(addTrends(addClassEstimates(addEstimates(addPowerEstimates(addZol(mergeCatalog(imported.items), zol.items)))), readPriceHistory(directory))
+  const items = addImages(addTrends(addClassEstimates(addEstimates(addPowerEstimates(addZol(mergeCatalog(imported.items), zol.items)
+    .filter(item => !notForDesktop(item))
+    .map(item => item.category === 'CPU' && WORKSTATION_CPU.test(item.name) ? { ...item, workstation: true } : item)))), readPriceHistory(directory))
     .map(item => ({
       ...performance.attach(item),
       market: item.dataSource === 'zol' || item.zolId || verifiedIds.has(item.id) ? 'cn' : 'global',

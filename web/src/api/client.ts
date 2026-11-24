@@ -138,6 +138,8 @@ export interface CatalogItem {
   possiblyStale?: boolean;
   /** 缺数据时估算出来的规格字段（如显卡 tdpWatts 取同芯片中位数） */
   estimatedSpecs?: string[];
+  /** 服务器 / 工作站 / 龙芯 CPU：需要专用主板，自动方案不选 */
+  workstation?: boolean;
   /** 联想搜索的匹配分 */
   matchScore?: number;
   estimateSamples?: number;
