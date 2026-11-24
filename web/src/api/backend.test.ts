@@ -152,3 +152,13 @@ describe('板型、冷排与 16pin（目录数据）', () => {
     expect(c.specs?.maxBoardFormFactor).toBe('MICRO ATX');
   });
 });
+
+describe('保存状态判断', () => {
+  it('服务端重排 specs 字段顺序不算未保存修改', () => {
+    const b = buildReducer(demoBuild(), { type: 'addCandidate', candidate: { ...candidateById('gpu-galax')!, specs: { lengthMm: 300, maxPowerWatts: 180 } }, priceCents: 399900, priceSource: 'demo' });
+    const server = viaBackend(b);
+    const gpu = server.slots.find((s: { id: string }) => s.id === 'GPU');
+    gpu.part.specs = { maxPowerWatts: 180, lengthMm: 300 };
+    expect(sameContent(fromApi(server), b)).toBe(true);
+  });
+});

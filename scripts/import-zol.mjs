@@ -344,10 +344,25 @@ function psuSummary(specs) {
  * Intel 没有固定换算，只在页面写明最大功耗（PL2 / 最大睿频功耗）时采用。
  */
 function cpuPeakWatts(p, socket, tdp) {
-  const explicit = num(p['最大睿频功耗'] ?? p['最大功耗'] ?? p['PL2']);
+  const explicit = num(p['最大加速功耗（MTP）'] ?? p['最大加速功耗(MTP)'] ?? p['最大睿频功耗'] ?? p['最大功耗'] ?? p['PL2']);
   if (explicit) return explicit;
   if (tdp && /^AM\d$/.test(socket ?? '') && /AMD|锐龙|Ryzen/i.test(`${p['CPU系列'] ?? ''} ${p['产品型号'] ?? ''}`)) return Math.round(tdp * 1.35);
   return undefined;
+}
+
+const CN_DIGITS = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+
+/** “二十四核心(8P+16E)” → 24；“六核心” → 6；“8核心” → 8 */
+export function countOf(value) {
+  const text = String(value ?? '');
+  // 以中文数字开头时按中文解析（避免取到括号里的 “8P+16E”）
+  const arabic = /^[一二两三四五六七八九十]/.test(text.trim()) ? null : text.match(/\d+/);
+  if (arabic) return Number(arabic[0]);
+  const m = text.match(/([一二两三四五六七八九]?)(十?)([一二三四五六七八九]?)/);
+  if (!m || !m[0]) return undefined;
+  const [, a, ten, b] = m;
+  const n = ten ? (a ? CN_DIGITS[a] : 1) * 10 + (b ? CN_DIGITS[b] : 0) : CN_DIGITS[a];
+  return n || undefined;
 }
 
 function cpuSpecs(p) {
@@ -355,8 +370,8 @@ function cpuSpecs(p) {
   const tdpWatts = num(p['热设计功耗(TDP)'] ?? p['热设计功耗']);
   return {
     socket,
-    cores: num(p['核心数量']),
-    threads: num(p['线程数量']),
+    cores: countOf(p['核心数量']),
+    threads: countOf(p['线程数量']),
     tdpWatts,
     maxPowerWatts: cpuPeakWatts(p, socket, tdpWatts),
     memoryType: (p['内存类型'] ?? '').match(/DDR\d/i)?.[0].toUpperCase(),

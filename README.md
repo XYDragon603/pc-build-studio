@@ -45,9 +45,10 @@ npm run web:test   # 前端测试，含与后端 calculateBuild 的一致性检�
 
 ```powershell
 npm run catalog:zol -- --category GPU --limit 600 --chips "RTX ?50\d0|RTX ?40\d0|RX ?9\d{3}|RX ?7\d{3}"
-npm run catalog:zol -- --category CASE --limit 200
-npm run catalog:zol -- --category COOLER --limit 200
+npm run catalog:zol -- --category CPU --limit 200          # 也支持 MOTHERBOARD RAM SSD PSU CASE COOLER
 ```
+
+已覆盖 8 类：显卡、CPU、主板、内存、固态硬盘、电源、机箱、散热器。CPU 的峰值功耗：AMD 锐龙按 PPT = TDP × 1.35 推出，Intel 采用页面上的“最大加速功耗（MTP）”。同一时间只允许一个 ZOL 任务运行（`.runtime/zol.lock`）。
 
 从 ZOL 产品库抓取型号与参数，输出 `.runtime/zol-catalog.json`（多次运行按 id 累积），重启 API 后并入 `/catalog`：类目、品牌、料号与已有记录唯一匹配时只补缺失字段和中文别名，否则作为独立条目。已支持显卡（长度、建议电源、供电接口、显存）、机箱（板型、显卡限长、散热器限高）、CPU 风冷散热器（高度、插槽）。
 
@@ -64,6 +65,20 @@ npm run catalog:prices    # 重抓已抓过的 ZOL 列表页（约 50 次请求�
 ```
 
 刷新后重启 `npm start`，再在网页右侧点“刷新估算价”。建议每周一次；参考价不是实时报价，下单前以商城价格为准。
+
+## 价格走势与降价提醒
+
+每次 `npm run catalog:prices` 都会把参考价追加到 `.runtime/zol-price-history.jsonl`。目录卡片显示“较上次 ↓/↑”和记录最低价；打开方案时会核对已选配件：估算价有变化可一键刷新，手动填的价格高于当前参考价也会提示（不会自动改）。
+
+已注册 Windows 计划任务 `PCBuilder-RefreshPrices`：每周日 10:00 在项目目录运行 `npm run catalog:prices`，错过时开机后补跑，日志在 `.runtime/zol-prices-scheduled.log`。不需要时可删除：
+
+```powershell
+Unregister-ScheduledTask -TaskName PCBuilder-RefreshPrices -Confirm:$false
+```
+
+## 按预算自动配
+
+网页预算旁的“按预算自动配”根据预算、用途和已锁定的配件，从目录挑一套兼容配置，先预览、再应用（只替换未锁定的配件，按估算价加入）。规则在 `src/recommend.mjs`：按用途分配预算；优先当前平台（AM5 / LGA1700 / LGA1851）与当代显卡芯片；显卡按芯片档次升降以贴合预算；过滤同类同规格中明显偏离的估算价。没有性能跑分数据，档次以估算价近似，每一项都写明选择理由。
 
 ## 京东联盟京东价（个人使用）
 

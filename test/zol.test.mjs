@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { boardFormFactor, maxRadiator, parseList, parseParams, parseRamCapacity, parseSockets } from '../scripts/import-zol.mjs';
+import { boardFormFactor, countOf, maxRadiator, parseList, parseParams, parseRamCapacity, parseSockets } from '../scripts/import-zol.mjs';
 
 // 按 ZOL 页面结构写的最小合成片段，不含站点原文
 const list = `
@@ -52,4 +52,14 @@ test('机箱冷排支持只认标准尺寸', () => {
   assert.equal(maxRadiator('顶置：支持140水冷 后置：支持120水冷'), 140);
   assert.equal(maxRadiator('支持120mm，240mm，280mm，360mm水冷'), 360);
   assert.equal(maxRadiator(undefined), undefined);
+});
+
+test('核心 / 线程数支持中文数字', () => {
+  assert.equal(countOf('四核心'), 4);
+  assert.equal(countOf('十二核心'), 12);
+  assert.equal(countOf('二十四核心(8P+16E)'), 24);
+  assert.equal(countOf('十六线程'), 16);
+  assert.equal(countOf('8核心'), 8);
+  assert.equal(countOf('十核心'), 10);
+  assert.equal(countOf(undefined), undefined);
 });

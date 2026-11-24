@@ -18,6 +18,7 @@
 | DELETE | `/builds/:id` | 请求体为 `{ "version": 2 }`，成功返回 204 |
 | POST | `/quotes/search` | CPU、GPU 报价回放或实时检索 |
 | POST | `/quotes/jd` | 京东联盟按 SKU 查京东价，请求体 `{ "skuIds": ["商品链接或编号"] }` |
+| POST | `/recommend` | 按预算自动配，请求体 `{ budgetCents, scenarios, locked }` |
 
 ## 前端初始化
 
@@ -120,3 +121,9 @@ npm run catalog:import
 ## 估算价
 
 目录条目可带 `estimatedPriceCents`、`estimateBasis` 与 `estimateSamples`：有 ZOL 参考价时 `estimateBasis` 为 `reference`；显卡缺参考价时，用同芯片、同显存条目参考价的中位数，至少 3 个样本，`estimateBasis` 为 `chip-median`。`priceObservedAt` 为参考价的观察时间。估算价不是报价。`npm run catalog:prices` 重抓已抓过的 ZOL 列表页刷新参考价，并追加 `.runtime/zol-price-history.jsonl`，重启 API 后生效。
+
+## 按预算自动配
+
+`POST /recommend` 请求体 `{ "budgetCents": 800000, "scenarios": ["2k", "quiet"], "locked": { "CPU": { "priceCents": 145000, "specs": { "socket": "AM5" } } } }`。`locked` 的键为标准槽位 ID，`specs` 使用与配件相同的兼容性字段。返回 `{ budgetCents, totalCents, lockedCents, picks: [{ slot, reason, item }], notes }`，`item` 为目录条目（含 `estimatedPriceCents`）。只使用有估算价、且兼容性所需规格齐全的条目；结果为估算，不是报价。
+
+目录条目在有价格历史时带 `priceTrend: { previousCents, changedAt, lowestCents, since, points }`。

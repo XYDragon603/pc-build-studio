@@ -50,12 +50,46 @@ function bestWithin(pool, cap) {
 
 const cheapestOf = pool => [...pool].sort((a, b) => price(a) - price(b))[0] ?? null;
 
+/** 当前平台与当代显卡芯片：用价格代表档次时，停产型号的参考价常常没更新，优先在这些里挑 */
+const CURRENT_SOCKETS = /^(AM5|LGA1700|LGA1851)$/;
+const CURRENT_GPU = /RTX\s*50\d0|RX\s*9\d{3}|ARC\s*B\d{3}/i;
+
+/** 同类同规格里比中位价低一半以上的估算价视为数据错误（如标价 ¥149 的 750W 金牌电源） */
+const BUCKETS = {
+  CPU: i => up(i.specs.socket),
+  GPU: i => `${up(i.specs.chipset)}:${i.specs.capacityGB}`,
+  MOTHERBOARD: i => `${up(i.specs.socket)}:${up(i.specs.memoryType)}`,
+  RAM: i => `${up(i.specs.memoryType)}:${i.specs.capacityGB}`,
+  SSD: i => String(i.specs.capacityGB),
+  PSU: i => String(Math.round((i.specs.ratedWatts ?? 0) / 100) * 100),
+  CASE: () => 'all',
+  COOLER: i => (i.specs.radiatorSizeMm ? `liquid:${i.specs.radiatorSizeMm}` : 'air'),
+};
+
+function dropPriceOutliers(category, pool) {
+  const groups = new Map();
+  for (const i of pool) {
+    const key = BUCKETS[category](i);
+    groups.set(key, [...(groups.get(key) ?? []), price(i)]);
+  }
+  const medians = new Map([...groups].map(([k, v]) => {
+    const sorted = [...v].sort((a, b) => a - b);
+    return [k, sorted.length >= 3 ? sorted[Math.floor(sorted.length / 2)] : null];
+  }));
+  return pool.filter(i => {
+    const m = medians.get(BUCKETS[category](i));
+    return !m || price(i) >= m * 0.5;
+  });
+}
+
 /**
  * @param items  目录条目（含 estimatedPriceCents）
  * @param input  { budgetCents, scenarios, locked: { [SLOT]: { priceCents, specs } } }
  */
 export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
-  const pools = Object.fromEntries(SLOTS.map(s => [s, items.filter(i => i.category === s && price(i) > 0)]));
+  const pools = Object.fromEntries(SLOTS.map(s => [s, dropPriceOutliers(s, items.filter(i => i.category === s && price(i) > 0
+    // 明显错误的显卡长度（如 128mm）不参与挑选
+    && (s !== 'GPU' || ((i.specs.lengthMm ?? 0) >= 150 && i.specs.lengthMm <= 380))))]));
   const notes = [];
   const picks = {};
   const lockedCents = Object.values(locked).reduce((sum, p) => sum + (p.priceCents ?? 0), 0);
@@ -72,9 +106,11 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
 
   // CPU
   if (!locked.CPU) {
-    const pool = pools.CPU.filter(i => i.specs.socket && /^(AM5|AM4|LGA1700|LGA1851)$/.test(up(i.specs.socket)));
-    const r = bestWithin(pool, cap('CPU'));
-    if (r) set('CPU', r.item, `分配 ${yuan(cap('CPU'))}，选预算内估算价最高的 CPU${r.over ? '（预算不足，取最便宜的）' : ''}`);
+    const all = pools.CPU.filter(i => i.specs.socket && /^(AM5|AM4|LGA1700|LGA1851)$/.test(up(i.specs.socket)));
+    const current = all.filter(i => CURRENT_SOCKETS.test(up(i.specs.socket)));
+    const currentFits = current.some(i => price(i) <= cap('CPU'));
+    const r = bestWithin(currentFits ? current : all, cap('CPU'));
+    if (r) set('CPU', r.item, `分配 ${yuan(cap('CPU'))}，${currentFits ? '优先 AM5 / LGA1700 / LGA1851 平台，' : '当前平台超出分配，放宽到 AM4，'}选预算内估算价最高的${r.over ? '（预算不足，取最便宜的）' : ''}`);
   }
   const socket = up(specsOf('CPU')?.socket);
 
@@ -106,16 +142,20 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
       const key = `${up(i.specs.chipset).replace(/^(GEFORCE|RADEON)\s*/, '')} ${i.specs.capacityGB}GB`;
       groups.set(key, [...(groups.get(key) ?? []), i]);
     }
-    return [...groups.entries()].filter(([, list]) => list.length >= 2).map(([key, list]) => {
+    const all = [...groups.entries()].filter(([, list]) => list.length >= 2).map(([key, list]) => {
       const sorted = list.map(price).sort((a, b) => a - b);
-      return { key, list, median: sorted[Math.floor(sorted.length / 2)] };
+      return { key, list, median: sorted[Math.floor(sorted.length / 2)], current: CURRENT_GPU.test(key) };
     }).sort((a, b) => a.median - b.median);
+    // 当代芯片里有在分配内的，就只在当代芯片里升降档；否则才考虑上代
+    const capGpu = locked.GPU ? 0 : cap('GPU');
+    const current = all.filter(g => g.current);
+    return current.some(g => g.median <= capGpu) ? current : all;
   })();
   let gpuTier = -1;
   const pickGpu = tier => {
     const g = gpuGroups[tier];
     const item = cheapestOf(g.list);
-    set('GPU', item, `档次 ${g.key}（${g.list.length} 款中位价 ${yuan(g.median)}），选这一档里最便宜的一款`);
+    set('GPU', item, `档次 ${g.key}（${g.list.length} 款中位价 ${yuan(g.median)}${g.current ? '，当代芯片' : ''}），选这一档里最便宜的一款`);
   };
   if (!locked.GPU && gpuGroups.length) {
     const c = cap('GPU');
@@ -171,8 +211,10 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
 
     // 硬盘：预算 ≥ ¥10,000 选 2TB，否则 1TB；优先 PCIe 4.0 以上、读 ≥ 5000MB/s；挑最便宜
     if (!locked.SSD) {
-      const targetGB = budgetCents >= 1000000 ? 2000 : 1000;
-      const pool = pools.SSD.filter(i => Math.abs((i.specs.capacityGB ?? 0) - targetGB) <= targetGB * 0.05);
+      const near = gb => pools.SSD.filter(i => Math.abs((i.specs.capacityGB ?? 0) - gb) <= gb * 0.05);
+      let targetGB = budgetCents >= 1000000 ? 2000 : 1000;
+      let pool = near(targetGB);
+      if (!pool.length && targetGB === 2000) { targetGB = 1000; pool = near(1000); }
       const fast = pool.filter(i => /PCIE\s*[45]/i.test(i.specs.interface ?? '') && (i.specs.readMBs ?? 0) >= 5000);
       const item = cheapestOf(fast.length ? fast : pool);
       if (item) set('SSD', item, `${targetGB >= 1000 ? `${targetGB / 1000}TB` : `${targetGB}GB`}${fast.length ? ' PCIe 4.0+、读 ≥5000MB/s' : ''}，满足条件里最便宜`);
@@ -182,14 +224,14 @@ export function recommend(items, { budgetCents, scenarios = [], locked = {} }) {
 
   const total = () => lockedCents + Object.values(picks).reduce((sum, p) => sum + price(p.item), 0);
 
-  // 超预算降显卡档次；富余超过 15% 且升一档仍在预算内则升档
+  // 超预算降显卡档次；富余超过 7% 且升一档仍在预算内则升档
   if (gpuTier >= 0) {
     while (total() > budgetCents && gpuTier > 0) {
       gpuTier--;
       pickGpu(gpuTier);
       fillRest();
     }
-    while (gpuTier < gpuGroups.length - 1 && total() < budgetCents * 0.85) {
+    while (gpuTier < gpuGroups.length - 1 && total() < budgetCents * 0.93) {
       const before = { tier: gpuTier, picks: { ...picks } };
       gpuTier++;
       pickGpu(gpuTier);

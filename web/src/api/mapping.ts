@@ -84,5 +84,13 @@ export function fromApi(a: ApiBuild | ApiTemplate): Build {
 
 /** 判断本地方案相对于上次保存的版本是否有改动（只比较会提交给服务端的内容）。 */
 export function sameContent(a: Build, b: Build): boolean {
-  return JSON.stringify(toApiInput(a)) === JSON.stringify(toApiInput(b));
+  return canonical(toApiInput(a)) === canonical(toApiInput(b));
+}
+
+/** 按字段名排序后序列化：服务端返回的 specs 字段顺序可能与本地不同，不能算作修改 */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, v) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.keys(v).sort().map(k => [k, (v as Record<string, unknown>)[k]]))
+      : v);
 }
