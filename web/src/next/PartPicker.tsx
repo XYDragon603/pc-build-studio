@@ -120,7 +120,7 @@ export function PartPicker({ slot, build, onClose, onPick, onIntegrated, onCateg
                   <span className="nx-pick-name"><strong title={item.name}>{item.name}</strong><small title={item.summary}>{item.summary}</small></span>
                   <span className="nx-pick-value">
                     <strong title={item.estimateBasis ? ESTIMATE_LABELS[item.estimateBasis] : undefined}>{priceText(item.estimatedPriceCents)}</strong>
-                    {isCurrent ? <small className="nx-tag">当前选择</small> : change ? <small className={`nx-tag ${change > 0 ? 'warn' : ''}`}>{change > 0 ? '+ ' : '省 '}{formatYuan(Math.abs(change))}</small> : null}
+                    {isCurrent ? <small className="nx-tag">当前选择</small> : change ? <small className={`nx-tag ${change > 0 ? 'warn' : 'ok'}`}>{change > 0 ? '+ ' : '省 '}{formatYuan(Math.abs(change))}</small> : null}
                     {item.compatibility === 'unknown' && <small className="nx-tag warn">规格待核对</small>}
                     {item.compatibility === 'conflict' && <small className="nx-tag error">规格冲突</small>}
                   </span>

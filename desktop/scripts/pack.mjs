@@ -19,7 +19,7 @@ const [appPath] = await packager({
   arch: 'x64',
   icon: path.join(root, 'icon.ico'),
   asar: false,
-  ignore: [/^\/out($|\/)/, /^\/scripts($|\/)/, /^\/icon\.svg$/, /^\/icon\.png$/],
+  ignore: [/^\/out($|\/)/, /^\/scripts($|\/)/, /^\/icon\.png$/],
   win32metadata: { ProductName: '装机工作台', FileDescription: '装机工作台', InternalName: 'PCBuilder', OriginalFilename: 'PCBuilder.exe' },
 });
 console.log(`已打包：${path.join(appPath, 'PCBuilder.exe')}`);

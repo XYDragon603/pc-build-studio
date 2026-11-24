@@ -42,7 +42,7 @@ function createWindow(port) {
     minWidth: 1100,
     minHeight: 720,
     title: '装机工作台',
-    backgroundColor: '#f7f5f0',
+    backgroundColor: '#e6f2ff',
     autoHideMenuBar: true,
     show: false,
     icon: path.join(__dirname, 'icon.ico'),

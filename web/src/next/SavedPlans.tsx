@@ -99,7 +99,7 @@ function SavedPreview({ build }: { build: Build }) {
     <>
       <header className="nx-section-head nx-saved-preview-head">
         <span className="nx-saved-icon"><Monitor size={26} /></span>
-        <div><h2>{build.name}</h2><span className="nx-tag"><CheckCircle2 size={14} />已保存</span></div>
+        <div><h2>{build.name}</h2><span className="nx-tag ok"><CheckCircle2 size={14} />已保存</span></div>
       </header>
       <ul>
         {SLOTS.flatMap(({ id, label }) => {

@@ -1,4 +1,4 @@
-import { Folder, LayoutGrid, Layers, Monitor, PencilLine } from 'lucide-react';
+import { Folder, LayoutGrid, Layers, PencilLine } from 'lucide-react';
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { api, ApiError, type CatalogItem, type PlanResult } from '../api/client';
 import { fromApi, sameContent, toApiInput } from '../api/mapping';
@@ -200,7 +200,7 @@ export default function NextApp() {
   return (
     <div className="nx-app">
       <aside className="nx-nav">
-        <div className="nx-brand"><span className="nx-brand-icon"><Monitor size={24} /></span><span><strong>装机工作台</strong><small>PC Build Studio</small></span></div>
+        <div className="nx-brand"><img className="nx-brand-icon" src="/icon.svg" alt="" width={44} height={44} /><span><strong>装机工作台</strong><small>PC Build Studio</small></span></div>
         <nav aria-label="工作台导航">
           {NAV.map(({ view: to, icon: Icon, label }) => (
             <button type="button" key={to} className={to === view ? 'on' : ''} aria-current={to === view ? 'page' : undefined} onClick={() => navigate(to)}><Icon size={20} aria-hidden />{label}</button>
