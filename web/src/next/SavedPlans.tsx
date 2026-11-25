@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { fromApi } from '../api/mapping';
 import { SLOT_ICONS } from '../components/icons';
+import { Dialog } from '../components/Dialog';
 import type { PlanSummary } from '../components/PlansDialog';
 import { totals } from '../domain/build';
 import { estimatePower } from '../domain/compat';
@@ -27,6 +28,7 @@ interface Props {
 
 export function SavedPlans({ plans, error, currentId, draft, onLoad, onDelete, onResume, onNew, onBackup, onRestore }: Props) {
   const [query, setQuery] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<PlanSummary | null>(null);
   const [selected, setSelected] = useState(currentId);
   const [details, setDetails] = useState<{ id: string; build: Build | null; error?: string } | null>(null);
   const file = useRef<HTMLInputElement>(null);
@@ -74,9 +76,7 @@ export function SavedPlans({ plans, error, currentId, draft, onLoad, onDelete, o
                   <strong className="nx-saved-price">{formatYuan(plan.totalCents)}</strong>
                 </button>
                 <button type="button" className="nx-btn nx-btn-outline" onClick={() => onLoad(plan.id)}>继续编辑</button>
-                <button type="button" className="nx-icon-btn nx-remove" aria-label={`删除${plan.name}`} onClick={() => {
-                  if (window.confirm(`删除方案「${plan.name}」？`)) onDelete(plan.id);
-                }}><Trash2 size={17} /></button>
+                <button type="button" className="nx-icon-btn nx-remove" aria-label={`删除${plan.name}`} onClick={() => setPendingDelete(plan)}><Trash2 size={17} /></button>
               </li>
             ))}
           </ul>}
@@ -87,6 +87,16 @@ export function SavedPlans({ plans, error, currentId, draft, onLoad, onDelete, o
             details.build ? <SavedPreview build={details.build} /> : <p className="nx-error" role="alert">{details.error}</p>}
         </aside>
       </div>
+      {/* 不用 window.confirm：Electron 在 Windows 上关掉原生对话框后，输入框常常没法再打字 */}
+      <Dialog open={!!pendingDelete} title="删除方案" onClose={() => setPendingDelete(null)}>
+        <div className="dialog-body">
+          <p>删除方案「{pendingDelete?.name}」？删除后不能恢复。</p>
+          <footer className="dialog-actions">
+            <button type="button" className="btn btn-ghost" onClick={() => setPendingDelete(null)}>取消</button>
+            <button type="button" className="btn btn-primary" onClick={() => { if (pendingDelete) onDelete(pendingDelete.id); setPendingDelete(null); }}>删除</button>
+          </footer>
+        </div>
+      </Dialog>
     </div>
   );
 }
