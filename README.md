@@ -81,6 +81,16 @@ npm run catalog:prices    # 重抓已抓过的 ZOL 列表页（默认、热门�
 
 固态硬盘另外抓了 ZOL “热门”排序的列表（`node scripts/import-zol.mjs --category SSD --order hot --limit 150`）：默认列表多是按系列列出的老型号，只有价格区间；热门列表是当前在售的具体容量，有单一参考价。
 
+外设（显示器、键盘、鼠标）用默认列表导入（这三个栏目的热门排序页返回 502）：
+
+```bash
+node scripts/import-zol.mjs --category MONITOR --limit 150 --max-pages 4
+node scripts/import-zol.mjs --category KEYBOARD --limit 100 --max-pages 3
+node scripts/import-zol.mjs --category MOUSE --limit 100 --max-pages 3
+```
+
+外设在方案里单独一栏，不占主机预算：出方案时打开“顺带配外设”，会按用途和这套方案的显卡挑显示器（显卡够强配 27 寸 2K 高刷，较弱配 1080p 高刷，办公 24 寸 1080p），游戏配机械键盘和游戏鼠标，办公配无线键鼠。
+
 每次 `npm run catalog:prices` 都会把参考价追加到 `.runtime/zol-price-history.jsonl`。目录卡片显示“较上次 ↓/↑”和记录最低价；打开方案时会核对已选配件：估算价有变化可一键刷新，手动填的价格高于当前参考价也会提示（不会自动改）。
 
 已注册 Windows 计划任务 `PCBuilder-RefreshPrices`：每周日、周三 10:00 通过 `scripts/refresh-prices.vbs` 在隐藏窗口里运行 `npm run catalog:prices`（直接用 cmd 会弹黑窗，被关掉就刷新失败），错过时开机后补跑，日志在 `.runtime/zol-prices-scheduled.log`。不需要时可删除：

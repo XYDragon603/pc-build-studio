@@ -38,6 +38,10 @@ const CATEGORIES = {
   // 只收 CPU 散热器（栏目里也有显卡散热器等）
   COOLER: { slug: 'cooling_product', suffix: '散热器', specs: coolerSpecs, summary: coolerSummary,
     accept: p => !p['散热器类型'] || p['散热器类型'].includes('CPU') },
+  // 外设（方案里单独一栏，不参与兼容性）；这三个栏目的“热门”排序页返回 502，用默认列表
+  MONITOR: { slug: 'lcd', suffix: '显示器', specs: monitorSpecs, summary: monitorSummary },
+  KEYBOARD: { slug: 'keyboard', suffix: '键盘', specs: keyboardSpecs, summary: keyboardSummary },
+  MOUSE: { slug: 'mice', suffix: '鼠标', specs: mouseSpecs, summary: mouseSummary },
 };
 
 /** 中文品牌 → BuildCores 使用的英文品牌名，用于按“品牌 + 料号”合并 */
@@ -417,6 +421,60 @@ function ssdSpecs(p) {
 function ssdSummary(specs) {
   const cap = specs.capacityGB && (specs.capacityGB >= 1000 ? `${specs.capacityGB / 1000}TB` : `${specs.capacityGB}GB`);
   return [cap, specs.interface, specs.readMBs && `读 ${specs.readMBs}MB/s`].filter(Boolean).join(' · ');
+}
+
+/** 显示器：尺寸、分辨率、刷新率（“165Hz（超频180Hz）”取最大值）、面板、是否曲面 */
+export function monitorSpecs(p) {
+  const [width, height] = String(p['最佳分辨率'] ?? '').match(/(\d{3,4})\s*[x×*]\s*(\d{3,4})/)?.slice(1).map(Number) ?? [];
+  const refresh = [...String(p['刷新率'] ?? '').matchAll(/(\d{2,3})\s*Hz/gi)].map(m => Number(m[1]));
+  const sizeInch = Number(String(p['屏幕尺寸'] ?? '').match(/\d+(?:\.\d+)?/)?.[0]);
+  return {
+    sizeInch: sizeInch > 0 ? sizeInch : undefined,
+    widthPx: width || undefined,
+    heightPx: height || undefined,
+    refreshHz: refresh.length ? Math.max(...refresh) : undefined,
+    panel: String(p['面板类型'] ?? '').split(/[，,\s]/)[0] || undefined,
+    curved: /曲面/.test(p['产品类型'] ?? '') || undefined,
+  };
+}
+
+/** 1920×1080 → 1080p，2560×1440 → 2K，3840×2160 → 4K；带鱼屏等其他比例直接写分辨率 */
+export function resolutionLabel(width, height) {
+  if (!width || !height) return null;
+  return { 1080: '1080p', 1440: '2K', 2160: '4K' }[height] && Math.abs(width / height - 16 / 9) < 0.05
+    ? { 1080: '1080p', 1440: '2K', 2160: '4K' }[height] : `${width}×${height}`;
+}
+
+function monitorSummary(specs) {
+  return [specs.sizeInch && `${specs.sizeInch} 英寸`, resolutionLabel(specs.widthPx, specs.heightPx),
+    specs.refreshHz && `${specs.refreshHz}Hz`, specs.panel, specs.curved && '曲面'].filter(Boolean).join(' · ');
+}
+
+const isWireless = connection => /无线|蓝牙|2\.4|三模|双模/.test(connection ?? '');
+
+/** 键盘：有线 / 无线、机械（含磁轴、客制化）、键数、轴体 */
+export function keyboardSpecs(p) {
+  const kind = `${p['产品定位'] ?? ''} ${p['产品类型'] ?? ''}`;
+  return {
+    wireless: isWireless(p['连接方式']),
+    // 剪刀脚、薄膜、巧克力键也会写在“轴体”栏里，不算机械
+    mechanical: /机械|客制化|磁轴/.test(kind) || (/轴/.test(p['轴体'] ?? '') && !/剪刀|薄膜|巧克力|X架构/.test(p['轴体'] ?? '')),
+    keys: num(p['按键数']),
+    switch: p['轴体'] ? String(p['轴体']).split(/[，,]/)[0].trim().slice(0, 24) : undefined,
+  };
+}
+
+function keyboardSummary(specs) {
+  return [specs.wireless ? '无线' : '有线', specs.mechanical ? '机械' : '薄膜', specs.keys && `${specs.keys} 键`, specs.switch].filter(Boolean).join(' · ');
+}
+
+/** 鼠标：有线 / 无线、最高 DPI、重量 */
+export function mouseSpecs(p) {
+  return { wireless: isWireless(p['连接方式']), dpi: num(p['最高分辨率']), weightG: num(p['鼠标重量']) };
+}
+
+function mouseSummary(specs) {
+  return [specs.wireless ? '无线' : '有线', specs.dpi && `${specs.dpi} DPI`, specs.weightG && `${specs.weightG}g`].filter(Boolean).join(' · ');
 }
 
 const paramUrl = id => `${ORIGIN}/${Math.ceil(Number(id) / 1000)}/${id}/param.shtml`;
