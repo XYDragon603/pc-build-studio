@@ -1,6 +1,6 @@
 // 装机工作台桌面程序：在程序内启动本地服务（随机端口，只监听本机），用独立窗口打开界面。
 // 代码与数据直接读取项目目录（打包时把项目路径写进 app-config.json），项目更新后无需重新打包。
-const { app, BrowserWindow, dialog, shell } = require('electron');
+const { app, BrowserWindow, dialog, screen, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -36,11 +36,14 @@ async function startServer(root) {
 
 function createWindow(port) {
   const origin = `http://127.0.0.1:${port}`;
+  // 默认 1440×920，屏幕小（如 1366×768 笔记本）时按工作区缩小，不超出屏幕
+  const area = screen.getPrimaryDisplay().workAreaSize;
   const win = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 1100,
-    minHeight: 720,
+    width: Math.min(1440, Math.round(area.width * 0.94)),
+    height: Math.min(920, Math.round(area.height * 0.94)),
+    // 允许缩到小窗口（界面在 1250 / 900 / 630px 有对应布局，放不下时区块内或整页滚动）
+    minWidth: 640,
+    minHeight: 480,
     title: '装机工作台',
     backgroundColor: '#e6f2ff',
     autoHideMenuBar: true,
