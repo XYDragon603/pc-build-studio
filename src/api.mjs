@@ -9,6 +9,7 @@ import { createCatalog } from './catalog.mjs';
 import { PERIPHERAL_SLOTS, recommendPeripherals } from './peripherals.mjs';
 import { JdUnion } from './jdunion.mjs';
 import { recommend, recommendPlans, SLOTS as RECOMMEND_SLOTS } from './recommend.mjs';
+import { applyPriceMode, parseCsv, PriceStore, toCsv } from './prices.mjs';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 
@@ -17,6 +18,14 @@ const bodyLimit = 64 * 1024;
 const methods = 'GET, POST, PUT, DELETE, OPTIONS';
 const buildPath = /^\/api\/v1\/builds\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/;
 const catalogPath = /^\/api\/v1\/catalog\/([a-z0-9-]{1,120})$/;
+const pricePath = /^\/api\/v1\/prices\/([a-z0-9-]{8,64})$/;
+
+/** 价格模式参数：estimate = 参考估算（默认），manual = 优先我的价格 */
+function priceOptions({ priceMode = 'estimate', allowUsed = false }) {
+  if (!['estimate', 'manual'].includes(priceMode)) throw invalid('priceMode 只能是 estimate 或 manual');
+  if (typeof allowUsed !== 'boolean') throw invalid('allowUsed 必须为布尔值');
+  return { mode: priceMode, allowUsed };
+}
 
 function localAddress(value) {
   try {
@@ -100,6 +109,11 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
   const store = new LocalStore(directory);
   const builds = new BuildRepository(store);
   const catalog = createCatalog(catalogDirectory);
+  const prices = new PriceStore(store);
+  let knownIds = null;
+  const catalogIds = () => (knownIds ??= new Set(catalog.all().map(item => item.id)));
+  /** 按价格模式取自动配置用的配件（先套用户价格，再筛可靠价格） */
+  const planItems = async options => applyPriceMode(catalog.all(), options.mode === 'manual' ? await prices.list() : [], options).filter(forPlans);
   let liveRequests = 0;
 
   const server = createServer({ requestTimeout: 30000, headersTimeout: 10000 }, async (request, response) => {
@@ -131,7 +145,53 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
           quotes: { liveConfigured, modes: ['replay', 'live'], categories: ['CPU', 'GPU'], jdUnionConfigured: jdUnion.configured } });
       }
       if (pathname === '/api/v1/slot-types' && method === 'GET') return json(response, 200, { items: slotTypes });
-      if (pathname === '/api/v1/catalog' && method === 'GET') return json(response, 200, catalog.list(url.searchParams));
+      if (pathname === '/api/v1/catalog' && method === 'GET') {
+        const result = catalog.list(url.searchParams);
+        if (url.searchParams.get('priceMode') !== 'manual') return json(response, 200, result);
+        const options = priceOptions({ priceMode: 'manual', allowUsed: url.searchParams.get('allowUsed') === 'true' });
+        return json(response, 200, { ...result, items: applyPriceMode(result.items, await prices.list(), options) });
+      }
+      // 价格记录（与规格分开存放）：列表、新增、删除、导入、导出
+      if (pathname === '/api/v1/prices' && method === 'GET') {
+        const records = await prices.list();
+        const id = url.searchParams.get('componentId');
+        return json(response, 200, { records: id ? records.filter(r => r.componentId === id) : records });
+      }
+      if (pathname === '/api/v1/prices' && method === 'POST') {
+        const input = await readJson(request);
+        if (!catalogIds().has(String(input.componentId ?? ''))) throw invalid('配件库里没有这个配件');
+        return json(response, 201, await prices.add(input));
+      }
+      if (pathname === '/api/v1/prices/export' && method === 'GET') {
+        const records = await prices.list();
+        if (url.searchParams.get('format') === 'csv') {
+          response.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+            'Content-Disposition': 'attachment; filename="prices.csv"' });
+          response.end('﻿' + toCsv(records));
+          return;
+        }
+        return json(response, 200, { version: 1, exportedAt: new Date().toISOString(), records });
+      }
+      if (pathname === '/api/v1/prices/import' && method === 'POST') {
+        const { format, content } = await readJson(request, 4 * 1024 ** 2);
+        if (typeof content !== 'string' || !content.trim()) throw invalid('content 不能为空');
+        let rows;
+        if (format === 'csv') rows = parseCsv(content);
+        else if (format === 'json') {
+          let data;
+          try { data = JSON.parse(content); } catch { throw invalid('JSON 格式无效'); }
+          rows = Array.isArray(data) ? data : data?.records;
+          if (!Array.isArray(rows)) throw invalid('JSON 需为记录数组，或带 records 数组的对象');
+        } else throw invalid('format 只能是 csv 或 json');
+        if (rows.length > 5000) throw invalid('一次最多导入 5000 条');
+        return json(response, 200, await prices.importRecords(rows, catalogIds()));
+      }
+      const singlePrice = pricePath.exec(pathname);
+      if (singlePrice && method === 'DELETE') {
+        if (!(await prices.remove(singlePrice[1]))) throw new ApiError(404, 'PRICE_NOT_FOUND', '没有这条价格记录');
+        response.writeHead(204).end();
+        return;
+      }
       if (pathname === '/api/v1/catalog/suggest' && method === 'GET') return json(response, 200, catalog.suggest(url.searchParams));
       if (singleProduct && method === 'GET') return json(response, 200, catalog.get(singleProduct[1]));
       if (pathname === '/api/v1/templates/demo' && method === 'GET') return json(response, 200, calculateBuild(buildTemplate('demo')));
@@ -161,20 +221,22 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         return;
       }
       if (pathname === '/api/v1/plans' && method === 'POST') {
-        const { budgetCents, scenarios = [], peripherals = [], maxOverPercent = null, locked = {} } = await readJson(request);
+        const { budgetCents, scenarios = [], peripherals = [], maxOverPercent = null, locked = {}, priceMode, allowUsed } = await readJson(request);
+        const options = priceOptions({ priceMode, allowUsed });
         if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
         if (!Array.isArray(scenarios) || scenarios.length > 8 || !scenarios.every(s => typeof s === 'string' && s.length <= 32)) throw invalid('scenarios 格式无效');
         if (!Array.isArray(peripherals) || !peripherals.every(slot => PERIPHERAL_SLOTS.includes(slot))) throw invalid('peripherals 只能包含 MONITOR、KEYBOARD、MOUSE');
         // null = 不限；0 = 严格预算；1–50 = 允许超出的百分比
         if (maxOverPercent !== null && (!Number.isInteger(maxOverPercent) || maxOverPercent < 0 || maxOverPercent > 50)) throw invalid('maxOverPercent 需为 0–50 的整数或 null');
-        const items = catalog.all().filter(forPlans);
+        const items = await planItems(options);
         const plans = recommendPlans(items, { budgetCents, scenarios, maxOverPercent, locked: parseLocked(locked) });
-        if (!peripherals.length) return json(response, 200, { plans });
+        const priceMeta = { mode: options.mode, allowUsed: options.allowUsed, userPriced: items.filter(item => item.priceSource === 'user').length };
+        if (!peripherals.length) return json(response, 200, { plans, priceMeta });
         // 外设不占主机预算：每套方案按自己的显卡和档位单独挑
         return json(response, 200, { plans: plans.map(plan => (plan.infeasible ? plan : { ...plan, peripherals: recommendPeripherals(items, {
           scenarios, tier: plan.id, igpu: plan.igpu, slots: peripherals,
           gpuIndex: plan.picks.find(pick => pick.slot === 'GPU')?.item.performance?.gaming?.index ?? null,
-        }) })) });
+        }) })), priceMeta });
       }
       // data/images/ 下的本地商品图（data/part-images.json 引用）
       const imageMatch = /^\/api\/v1\/images\/([\w.-]+\.(?:jpe?g|png|webp|gif))$/i.exec(pathname);
@@ -219,10 +281,11 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         return json(response, 200, { ...report, target, results: report.results.map(quoteForClient) });
       }
 
-      const allowed = singleBuild ? 'GET, PUT, DELETE' : singleProduct && pathname !== '/api/v1/catalog/suggest' ? 'GET' : {
+      const allowed = singleBuild ? 'GET, PUT, DELETE' : pricePath.test(pathname) ? 'DELETE' : singleProduct && pathname !== '/api/v1/catalog/suggest' ? 'GET' : {
         '/api/v1/builds': 'GET, POST', '/api/v1/quotes/search': 'POST', '/api/v1/quotes/jd': 'POST', '/api/v1/recommend': 'POST', '/api/v1/plans': 'POST',
         '/api/v1/draft': 'GET, PUT', '/api/v1/builds/backup': 'GET, POST',
         '/api/v1/catalog': 'GET', '/api/v1/catalog/suggest': 'GET',
+        '/api/v1/prices': 'GET, POST', '/api/v1/prices/export': 'GET', '/api/v1/prices/import': 'POST',
         '/api/v1/health': 'GET', '/api/v1/slot-types': 'GET', '/api/v1/templates/demo': 'GET',
       }[pathname];
       if (typeof allowed === 'string') {
