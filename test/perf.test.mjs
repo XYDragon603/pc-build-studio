@@ -64,3 +64,16 @@ test('Intel KF / F 型号对上 K / 无 F 的游戏指数；AMD 不做模糊匹�
   assert.equal(attach({ category: 'CPU', name: 'Intel 酷睿 i3 14100', specs: {} }).performance.gaming.index, 53.5);
   assert.equal(attach({ category: 'CPU', name: 'AMD Ryzen 5 7600', specs: {} }).performance, undefined);
 });
+
+test('显存版本不同的显卡不套用评测分数（3050 6GB 不用 8GB 的分数）', async () => {
+  const { loadPerformance } = await import('../src/performance.mjs');
+  const perf = loadPerformance(null);
+  const g8 = perf.attach({ category: 'GPU', name: 'RTX 3050 8G', specs: { chipset: 'GeForce RTX 3050', capacityGB: 8 } });
+  const g6 = perf.attach({ category: 'GPU', name: 'RTX 3050 6G', specs: { chipset: 'GeForce RTX 3050', capacityGB: 6 } });
+  assert.ok(g8.performance.gaming.index > 0);
+  assert.equal(g6.performance.gaming, null);
+  assert.match(g6.performance.note, /6GB/);
+  // 有单独数据的版本照常匹配
+  const ti8 = perf.attach({ category: 'GPU', name: '5060 Ti 8G', specs: { chipset: 'GeForce RTX 5060 Ti', capacityGB: 8 } });
+  assert.ok(ti8.performance.gaming.index > 0);
+});

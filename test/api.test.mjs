@@ -483,6 +483,19 @@ test('内存按频率档分组：DDR5 4800 不和 6000 比价，不会被误判�
   assert.deepEqual([(await get('buildcores-6400')).estimatedPriceCents, (await get('buildcores-6400')).estimateBasis], [89000, 'spec-median']);
 });
 
+test('价格可信度：多来源且在中位价附近为高；单一来源、上一代、疑似旧价分别标记', async t => {
+  const gpu = (id, cents, chip = 'GeForce RTX 5070', gb = 12) => ({ id, name: id, category: 'GPU', specs: { chipset: chip, capacityGB: gb }, referencePriceCents: cents });
+  const request = await estimateFixture(t, [
+    gpu('zol-a', 450000), gpu('zol-b', 460000), gpu('zol-c', 470000), gpu('zol-d', 480000),
+    gpu('zol-old', 120000, 'GeForce RTX 3060', 12),
+  ], []);
+  const get = async id => (await request('/catalog/' + id)).data;
+  assert.equal((await get('zol-a')).priceConfidence, 'high');
+  const old = await get('zol-old');
+  assert.equal(old.priceConfidence, 'medium');
+  assert.deepEqual(old.priceFlags, ['single-source', 'legacy']);
+});
+
 test('输入联想：模糊匹配型号、中英文品牌互通，按匹配度排序', async t => {
   const part = (id, name, extra = {}) => ({ id, name, category: 'GPU', specs: {}, referencePriceCents: 300000, ...extra });
   const request = await estimateFixture(t, [

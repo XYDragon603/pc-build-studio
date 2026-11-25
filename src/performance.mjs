@@ -29,6 +29,7 @@ export function loadPerformance(directory, dataFile = new URL('../data/perf-gami
     let key = null;
     let b = null;
     let g = null;
+    let variantNote = null;
     if (item.category === 'CPU') {
       key = cpuKey(item.name) ?? cpuKey(item.mpn) ?? item.aliases?.map(cpuKey).find(Boolean) ?? null;
       b = key && blenderCpu.get(key);
@@ -40,20 +41,27 @@ export function loadPerformance(directory, dataFile = new URL('../data/perf-gami
       key = gpuKey(item.specs?.chipset) ?? gpuKey(item.name);
       b = key && blenderGpu.get(key);
       // 游戏表可按显存区分（如 RTX 5060 TI 16GB），优先精确匹配
-      g = key && (gamingGpu.get(`${key} ${item.specs?.capacityGB}GB`) ?? gamingGpu.get(key));
+      const exact = key && gamingGpu.get(`${key} ${item.specs?.capacityGB}GB`);
+      g = key && (exact ?? gamingGpu.get(key));
+      // 评测用的是另一种显存版本（如 3050 8GB 的分数不能给 3050 6GB）：没有单独数据就不套用
+      if (g && !exact && g.memoryGB && item.specs?.capacityGB && item.specs.capacityGB !== g.memoryGB) {
+        variantNote = `${key} ${item.specs.capacityGB}GB 与评测版本（${g.memoryGB}GB）的核心 / 位宽可能不同，没有单独的测试数据`;
+        g = null;
+      }
       // 国内特供 D 版（如 RTX 5090 D、4090 D）游戏性能与标准版基本一致，沿用标准版并注明
       if (!g && key && / D$/.test(key)) {
         const base = gamingGpu.get(key.replace(/ D$/, ''));
         if (base) g = { ...base, label: `按 ${key.replace(/ D$/, '')} 计` };
       }
     }
-    if (!b && !g) return item;
+    if (!b && !g) return variantNote ? { ...item, performance: { key, blender: null, gaming: null, note: variantNote } } : item;
     return {
       ...item,
       performance: {
         key,
         blender: b ? { score: b.score, runs: b.runs, api: b.api } : null,
         gaming: g ? { index: g.relative, label: g.label ?? null } : null,
+        ...(variantNote ? { note: variantNote } : {}),
       },
     };
   }

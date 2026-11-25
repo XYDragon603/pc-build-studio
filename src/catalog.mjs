@@ -430,6 +430,55 @@ export function notForDesktop(item) {
 /** 服务器 / 工作站 / 龙芯 CPU：能搜到，但自动方案不选，界面标注 */
 const WORKSTATION_CPU = /xeon|至强|threadripper|epyc|霄龙|龙芯|loongson/i;
 
+/** 上一代平台 / 显卡：可能已停产或只剩库存，参考价不一定代表现货（只做分类，不断言停产） */
+function isLegacy(item) {
+  const s = item.specs ?? {};
+  // 与显卡同一口径：隔了两代及以上。AM4（Zen 3 及更早，当前是 Zen 5）、12 代酷睿（之后有 13/14 代、Ultra 200）
+  if (item.category === 'CPU') return /^(LGA115\d|LGA1151|LGA1200|AM3\+?|AM4|FM2\+?|TR4)$/i.test(s.socket ?? '') || /RYZEN\s*[3579]?\s*[1-5]\d{3}/i.test(item.name) || /I[3579][\s-]*12\d{3}/i.test(item.name);
+  // 隔了两代及以上：GTX、RTX 20 / 30 系，RX 5000 / 6000 系
+  if (item.category === 'GPU') return /GTX|RTX\s*[23]0\d0|RX\s*[56]\d{2,3}\b|RX\s*5[0-9]{3}|RX\s*6[0-9]{3}/i.test(s.chipset ?? item.name);
+  if (item.category === 'MOTHERBOARD') return /^(LGA115\d|LGA1151|LGA1200|AM3\+?)$/i.test(s.socket ?? '');
+  return false;
+}
+
+/**
+ * 价格可信度（不改价格，只标注）：
+ * - high：ZOL 参考价，同规格至少 3 个来源且价格在同规格中位价的 0.75–1.6 倍之间
+ * - medium：只有一个来源，或同型号 / 同芯片 / 同规格估算
+ * - low：粗估、系列起价、疑似旧价
+ * priceFlags：single-source（同规格只有这一个参考价）、wide-range（同规格价格差 3 倍以上）、legacy（上一代产品）
+ */
+function addPriceConfidence(items) {
+  const groupKey = item => {
+    const s = item.specs ?? {};
+    if (item.category === 'GPU') return s.chipset && s.capacityGB ? `GPU:${normalize(s.chipset)}:${s.capacityGB}` : null;
+    const g = estimateGroup(item);
+    return g === null ? null : `${item.category}:${g}`;
+  };
+  const groups = new Map();
+  for (const item of items) {
+    const key = groupKey(item);
+    if (!key || item.estimateBasis !== 'reference' || !(item.estimatedPriceCents > 0)) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item.estimatedPriceCents);
+  }
+  return items.map(item => {
+    if (!(item.estimatedPriceCents > 0)) return item;
+    const samples = groups.get(groupKey(item)) ?? [];
+    const flags = [];
+    if (item.estimateBasis === 'reference' && samples.length <= 1) flags.push('single-source');
+    if (samples.length >= 3 && Math.max(...samples) > Math.min(...samples) * 3) flags.push('wide-range');
+    if (isLegacy(item)) flags.push('legacy');
+    let confidence = 'medium';
+    if (item.possiblyStale || ['class-median', 'series-low'].includes(item.estimateBasis)) confidence = 'low';
+    else if (item.estimateBasis === 'reference' && samples.length >= 3) {
+      const m = median(samples);
+      if (item.estimatedPriceCents >= m * 0.75 && item.estimatedPriceCents <= m * 1.6) confidence = 'high';
+    }
+    return { ...item, priceConfidence: confidence, ...(flags.length ? { priceFlags: flags } : {}) };
+  });
+}
+
 /** 中英文品牌名互通：搜“华硕”能找到 ASUS，反之亦然 */
 const BRAND_ALIASES = [
   ['asus', '华硕'], ['msi', '微星'], ['gigabyte', '技嘉'], ['asrock', '华擎'], ['colorful', '七彩虹'], ['galax', '影驰'], ['zotac', '索泰'],
@@ -500,11 +549,11 @@ export function createCatalog(directory = '.runtime') {
   const imported = readImported(directory);
   const zol = readImported(directory, 'zol-catalog.json');
   const performance = loadPerformance(directory);
-  const items = addImages(addTrends(addClassEstimates(addEstimates(addPowerEstimates(addZol(mergeCatalog(imported.items), zol.items)
+  const items = addImages(addTrends(addPriceConfidence(addClassEstimates(addEstimates(addPowerEstimates(addZol(mergeCatalog(imported.items), zol.items)
     // 从参数表补全接口数量、尺寸、12V 输出等字段（只补缺的，不覆盖）
     .map(item => (item.rawParams ? { ...item, specs: enrichSpecs(item) } : item))
     .filter(item => !notForDesktop(item))
-    .map(item => item.category === 'CPU' && WORKSTATION_CPU.test(item.name) ? { ...item, workstation: true } : item)))), readPriceHistory(directory))
+    .map(item => item.category === 'CPU' && WORKSTATION_CPU.test(item.name) ? { ...item, workstation: true } : item))))), readPriceHistory(directory))
     .map(item => ({
       ...performance.attach(item),
       market: item.dataSource === 'zol' || item.zolId || verifiedIds.has(item.id) ? 'cn' : 'global',

@@ -5,31 +5,37 @@
     "resolution": "2560x1440",
     "baseline": "PNY RTX 5080 Slim OC 16 GB = 100（原厂 RTX 5080 为 96）",
     "date": null,
-    "note": "按用户提供的截图逐条录入；显卡名按芯片与显存归一。表中未列出的芯片（如 RX 9070 GRE、Arc B570）没有游戏指数。 标记 converted 的条目来自另一张 TechPowerUp 2560x1440 相对性能图（RTX 4070 Ti = 100%），按 TPU 值最接近的 4 张两图共有显卡的平均比例换算，误差约 ±2；早先这些条目按 1080p 图换算，2026-11-24 改用 1440p 图。 2026-11-24 另补：RX 9070 GRE 取自 TPU RX 9070 GRE 评测的 1440p 相对性能图；RX 6650 XT、GTX 1660 SUPER、RX 6500 XT、RTX 2070/2080 取自 TPU RX 7600 评测的 1080p 图；GTX 1650 SUPER、1660 Ti、1060、RX 5500 XT/5600 XT/5700、RTX 2060/2070/2080 SUPER 取自 TPU RX 6500 XT 评测的 1080p 图。A、B 按同图最接近的 4 款表内原始数据换算；C 的低端缺原始数据，锚点也用 B 换算出的 RX 6500 XT、GTX 1660 SUPER 等。 标“按比例估算”的条目（GTX 1650/1660、RX 6750 XT/6750 GRE/7650 GRE）不是评测原图读数，是按同芯片/同规格型号的经验比例估算（estimated 字段写明公式），误差可能到 ±3。",
+    "note": "按用户提供的截图逐条录入；显卡名按芯片与显存归一。表中未列出的芯片（如 RX 9070 GRE、Arc B570）没有游戏指数。 标记 converted 的条目来自另一张 TechPowerUp 2560x1440 相对性能图（RTX 4070 Ti = 100%），按 TPU 值最接近的 4 张两图共有显卡的平均比例换算，误差约 ±2；早先这些条目按 1080p 图换算，2026-11-24 改用 1440p 图。 2026-11-24 另补：RX 9070 GRE 取自 TPU RX 9070 GRE 评测的 1440p 相对性能图；RX 6650 XT、GTX 1660 SUPER、RX 6500 XT、RTX 2070/2080 取自 TPU RX 7600 评测的 1080p 图；GTX 1650 SUPER、1660 Ti、1060、RX 5500 XT/5600 XT/5700、RTX 2060/2070/2080 SUPER 取自 TPU RX 6500 XT 评测的 1080p 图。A、B 按同图最接近的 4 款表内原始数据换算；C 的低端缺原始数据，锚点也用 B 换算出的 RX 6500 XT、GTX 1660 SUPER 等。 标“按比例估算”的条目（GTX 1650/1660、RX 6750 XT/6750 GRE/7650 GRE）不是评测原图读数，是按同芯片/同规格型号的经验比例估算（estimated 字段写明公式），误差可能到 ±3。 memoryGB 为评测所用版本的显存：同芯片不同显存的版本（如 RTX 3050 6GB、RTX 3060 8GB、RTX 2060 12GB）核心数 / 位宽不同，没有单独数据时不套用这个分数。",
     "entries": [
       {
         "key": "RTX 5090",
-        "relative": 132
+        "relative": 132,
+        "memoryGB": 32
       },
       {
         "key": "RTX 4090",
-        "relative": 110
+        "relative": 110,
+        "memoryGB": 24
       },
       {
         "key": "RTX 5080",
-        "relative": 96
+        "relative": 96,
+        "memoryGB": 16
       },
       {
         "key": "RTX 4080",
-        "relative": 89
+        "relative": 89,
+        "memoryGB": 16
       },
       {
         "key": "RTX 4080 SUPER",
-        "relative": 89
+        "relative": 89,
+        "memoryGB": 16
       },
       {
         "key": "RTX 5070 TI",
-        "relative": 86
+        "relative": 86,
+        "memoryGB": 16
       },
       {
         "key": "RX 7900 XTX",
@@ -37,11 +43,13 @@
       },
       {
         "key": "RX 9070 XT",
-        "relative": 81
+        "relative": 81,
+        "memoryGB": 16
       },
       {
         "key": "RTX 4070 TI SUPER",
-        "relative": 77
+        "relative": 77,
+        "memoryGB": 16
       },
       {
         "key": "RX 7900 XT",
@@ -49,7 +57,8 @@
       },
       {
         "key": "RX 9070",
-        "relative": 75
+        "relative": 75,
+        "memoryGB": 16
       },
       {
         "key": "RTX 3090 TI",
@@ -57,15 +66,18 @@
       },
       {
         "key": "RTX 4070 TI",
-        "relative": 71
+        "relative": 71,
+        "memoryGB": 12
       },
       {
         "key": "RTX 5070",
-        "relative": 70
+        "relative": 70,
+        "memoryGB": 12
       },
       {
         "key": "RTX 4070 SUPER",
-        "relative": 66
+        "relative": 66,
+        "memoryGB": 12
       },
       {
         "key": "RX 7900 GRE",
@@ -76,7 +88,8 @@
         "relative": 64,
         "label": "1440p 换算",
         "converted": true,
-        "from1440p": 100
+        "from1440p": 100,
+        "memoryGB": 12
       },
       {
         "key": "RX 6900 XT",
@@ -84,15 +97,18 @@
       },
       {
         "key": "RTX 3080",
-        "relative": 59
+        "relative": 59,
+        "memoryGB": 10
       },
       {
         "key": "RTX 4070",
-        "relative": 58
+        "relative": 58,
+        "memoryGB": 12
       },
       {
         "key": "RX 7800 XT",
-        "relative": 58
+        "relative": 58,
+        "memoryGB": 16
       },
       {
         "key": "RX 6800 XT",
@@ -104,7 +120,8 @@
       },
       {
         "key": "RX 7700 XT",
-        "relative": 50
+        "relative": 50,
+        "memoryGB": 12
       },
       {
         "key": "RTX 5060 TI 8GB",
@@ -115,7 +132,8 @@
         "relative": 48,
         "label": "1440p 换算",
         "converted": true,
-        "from1440p": 66
+        "from1440p": 66,
+        "memoryGB": 8
       },
       {
         "key": "RX 6800",
@@ -130,7 +148,8 @@
       },
       {
         "key": "RTX 3070",
-        "relative": 45
+        "relative": 45,
+        "memoryGB": 8
       },
       {
         "key": "RX 9060 XT 8GB",
@@ -153,7 +172,8 @@
       },
       {
         "key": "RTX 5060",
-        "relative": 44
+        "relative": 44,
+        "memoryGB": 8
       },
       {
         "key": "RX 6750 XT",
@@ -164,7 +184,8 @@
       },
       {
         "key": "RTX 3060 TI",
-        "relative": 39
+        "relative": 39,
+        "memoryGB": 8
       },
       {
         "key": "RX 6700 XT",
@@ -182,7 +203,8 @@
       },
       {
         "key": "ARC B580",
-        "relative": 36
+        "relative": 36,
+        "memoryGB": 12
       },
       {
         "key": "RTX 2080",
@@ -218,7 +240,8 @@
       },
       {
         "key": "RTX 4060",
-        "relative": 33
+        "relative": 33,
+        "memoryGB": 8
       },
       {
         "key": "RX 6650 XT",
@@ -233,11 +256,13 @@
       },
       {
         "key": "RTX 5050",
-        "relative": 32
+        "relative": 32,
+        "memoryGB": 8
       },
       {
         "key": "RX 7600",
-        "relative": 31
+        "relative": 31,
+        "memoryGB": 8
       },
       {
         "key": "RTX 2070 SUPER",
@@ -248,7 +273,8 @@
       },
       {
         "key": "RTX 3060",
-        "relative": 30
+        "relative": 30,
+        "memoryGB": 12
       },
       {
         "key": "ARC A750",
@@ -315,11 +341,13 @@
       },
       {
         "key": "RTX 3050",
-        "relative": 21
+        "relative": 21,
+        "memoryGB": 8
       },
       {
         "key": "RTX 2060",
-        "relative": 20
+        "relative": 20,
+        "memoryGB": 6
       },
       {
         "key": "GTX 1660 SUPER",
@@ -368,7 +396,8 @@
         "relative": 13,
         "label": "1080p 换算",
         "converted": true,
-        "from1080p": 92
+        "from1080p": 92,
+        "memoryGB": 6
       },
       {
         "key": "GTX 1650",
