@@ -208,12 +208,24 @@ function ssdKey({ capacityGB, interface: connection }) {
   return `${tier}:${/\bSATA/i.test(bus) ? 'sata' : gen ? 'pcie' + gen : 'unknown'}`;
 }
 
+/**
+ * 内存频率档：DDR5 4800 与 6000 价格差得多，同规格估价 / 旧价判断要分开。
+ * DDR4：≤2666 / 2933–3200 / ≥3466；DDR5：≤5200 / 5600 / 6000–6400 / ≥6800；不认识的类型或缺频率归 'any'
+ */
+function ramSpeedTier(memoryType, speed) {
+  const type = normalize(memoryType);
+  if (!(speed > 0)) return 'any';
+  if (type === 'ddr4') return speed <= 2666 ? 'low' : speed <= 3200 ? '3200' : '3600+';
+  if (type === 'ddr5') return speed <= 5200 ? '4800' : speed < 6000 ? '5600' : speed <= 6400 ? '6000' : '6800+';
+  return 'any';
+}
+
 function estimateGroup(item) {
   const specs = item.specs ?? {};
   switch (item.category) {
     case 'CPU': return cpuKey(item.name);
     case 'RAM': return specs.memoryType && specs.capacityGB > 0 && specs.modules > 0
-      ? `${normalize(specs.memoryType)}:${specs.capacityGB}:${specs.modules}` : null;
+      ? `${normalize(specs.memoryType)}:${specs.capacityGB}:${specs.modules}:${ramSpeedTier(specs.memoryType, specs.speedMTs)}` : null;
     case 'PSU': return specs.ratedWatts > 0
       ? `${Math.round(specs.ratedWatts / 50) * 50}:${efficiencyTier(specs.efficiency)}` : null;
     case 'SSD': return ssdKey(specs);

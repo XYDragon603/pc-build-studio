@@ -434,6 +434,21 @@ test('笔记本 CPU、手机存储芯片不进目录；服务器 / 工作站 CPU
   assert.equal((await request('/catalog/zol-desk')).data.workstation, undefined);
 });
 
+test('内存按频率档分组：DDR5 4800 不和 6000 比价，不会被误判为旧价', async t => {
+  const kit = (id, speedMTs, price) => ({ id, name: id, category: 'RAM', specs: { memoryType: 'DDR5', capacityGB: 32, modules: 2, speedMTs }, referencePriceCents: price });
+  const request = await estimateFixture(t, [
+    kit('zol-4800-a', 4800, 48000), kit('zol-4800-b', 4800, 50000), kit('zol-4800-c', 4800, 52000), kit('zol-4800-d', 4800, 51000),
+    kit('zol-6000-a', 6000, 85000), kit('zol-6000-b', 6000, 90000), kit('zol-6000-c', 6000, 92000), kit('zol-6000-d', 6000, 88000),
+    kit('zol-6000-old', 6000, 47900),
+  ], [kit('buildcores-6400', 6400, undefined)]);
+  const get = async id => (await request('/catalog/' + id)).data;
+  // 混在一起时中位价约 ¥850，¥480 的 4800 套条会被当成旧价；分档后不会
+  assert.equal((await get('zol-4800-a')).possiblyStale, undefined);
+  assert.equal((await get('zol-6000-old')).possiblyStale, true);
+  // 6000–6400 同档估价
+  assert.deepEqual([(await get('buildcores-6400')).estimatedPriceCents, (await get('buildcores-6400')).estimateBasis], [89000, 'spec-median']);
+});
+
 test('输入联想：模糊匹配型号、中英文品牌互通，按匹配度排序', async t => {
   const part = (id, name, extra = {}) => ({ id, name, category: 'GPU', specs: {}, referencePriceCents: 300000, ...extra });
   const request = await estimateFixture(t, [
