@@ -3,6 +3,7 @@
 //   node scripts/import-zol.mjs --category GPU --limit 50
 //   node scripts/import-zol.mjs --prices                    # 只重抓已抓过的列表页，刷新全部类目的参考价
 //   node scripts/import-zol.mjs --prices --category GPU
+//   node scripts/import-zol.mjs --discover                  # 找新型号：重抓已抓过的列表页，只给没见过的型号抓参数页（每类最多 30 款）
 //   node scripts/import-zol.mjs --category GPU --limit 300 --chips "RTX 50|RTX 40|RX 9|RX 7"
 //   node scripts/import-zol.mjs --category SSD --order hot --limit 150   # “热门”排序（/xxx/hot.html、hot_2.html），当前在售型号多
 //
@@ -76,12 +77,15 @@ const { values: args } = parseArgs({ args: cli ? process.argv.slice(2) : [], opt
   order: { type: 'string', default: 'default' },
   // 刷新参考价：不读缓存，重抓已抓过的列表页，只更新价格并记录历史
   prices: { type: 'boolean', default: false },
+  // 找新型号：重抓已抓过的列表页（不读缓存），只导入快照里还没有的型号
+  discover: { type: 'boolean', default: false },
 } });
 
 const pricesMode = args.prices;
-const category = (pricesMode && !process.argv.includes('--category') ? 'ALL' : args.category).toUpperCase();
+const discoverMode = args.discover;
+const category = ((pricesMode || discoverMode) && !process.argv.includes('--category') ? 'ALL' : args.category).toUpperCase();
 const config = CATEGORIES[category];
-if (!config && !(pricesMode && category === 'ALL')) throw new Error(`暂只支持：${Object.keys(CATEGORIES).join('、')}`);
+if (!config && !((pricesMode || discoverMode) && category === 'ALL')) throw new Error(`暂只支持：${Object.keys(CATEGORIES).join('、')}`);
 const limit = positive(args.limit, 'limit');
 const delayMs = Math.max(1000, positive(args.delay, 'delay'));
 const maxPages = positive(args['max-pages'], 'max-pages');
@@ -480,15 +484,16 @@ function mouseSummary(specs) {
 const paramUrl = id => `${ORIGIN}/${Math.ceil(Number(id) / 1000)}/${id}/param.shtml`;
 const normalize = value => (value ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 
-function toRecord(listing, parsed) {
+function toRecord(listing, parsed, cat = category) {
+  const conf = CATEGORIES[cat];
   const { params, englishName, brand } = parsed;
-  const specs = Object.fromEntries(Object.entries(config.specs(params)).filter(([, v]) => v !== undefined));
+  const specs = Object.fromEntries(Object.entries(conf.specs(params)).filter(([, v]) => v !== undefined));
   const mpn = params['产品型号']?.trim() || null;
   const manufacturer = brand ? (BRANDS[brand] ?? brand) : null;
-  const summary = config.summary(specs);
+  const summary = conf.summary(specs);
   return {
     id: `zol-${listing.zolId}`,
-    category,
+    category: cat,
     name: listing.name,
     manufacturer,
     mpn,
@@ -497,7 +502,7 @@ function toRecord(listing, parsed) {
     aliases: [englishName, brand && manufacturer !== brand ? brand : null].filter(Boolean),
     specs,
     imageUrl: listing.imageUrl,
-    imageSourceUrl: listing.imageUrl ? `${ORIGIN}/${config.slug}/index${listing.zolId}.shtml` : undefined,
+    imageSourceUrl: listing.imageUrl ? `${ORIGIN}/${conf.slug}/index${listing.zolId}.shtml` : undefined,
     sourceUrl: paramUrl(listing.zolId),
     referencePriceCents: listing.referencePriceCents,
     ...(listing.priceRangeCents ? { priceRangeCents: listing.priceRangeCents } : {}),
@@ -568,8 +573,84 @@ async function refreshPrices() {
   console.log(JSON.stringify({ stopped, networkRequests, historyRecords: history.length, report }, null, 2));
 }
 
+/**
+ * 找新型号（每月一次）：按缓存里已有的页数重抓各类目的列表页（默认、热门排序都算），
+ * 列表里出现、快照里还没有的型号才抓参数页并导入；每类最多 --limit 款（默认 30），控制请求数。
+ * 已经抓过参数页但不适用的（如笔记本内存）参数页有缓存，再次遇到不会联网。
+ */
+async function discoverModels() {
+  const store = new LocalStore();
+  const snapshot = await store.read('zol-catalog.json', { items: [] });
+  const byId = new Map(snapshot.items.map(item => [item.id, item]));
+  // 看过但不适用的型号（笔记本 CPU / 内存 / 电源、显卡散热器等）记下来，下次直接跳过，
+  // 不然每月都排在最前面占满名额，真正的新型号永远进不来
+  const skipped = new Set(snapshot.skippedIds ?? []);
+  const categories = category === 'ALL' ? Object.keys(CATEGORIES) : [category];
+  const perCategory = process.argv.includes('--limit') ? limit : 30;
+  const fetchedAt = new Date().toISOString();
+  const report = {};
+  const added = [];
+  let stopped = null;
+  outer: for (const cat of categories) {
+    const conf = CATEGORIES[cat];
+    const exclude = cat === 'GPU' && args.exclude ? new RegExp(args.exclude, 'i') : null;
+    const r = report[cat] = { pages: 0, newListings: 0, imported: 0, excluded: 0, notApplicable: 0, missingParams: 0 };
+    const fresh = [];
+    const seen = new Set();
+    for (const order of ORDERS) for (let page = 1, pages = await cachedListPages(conf.slug, order); page <= pages; page++) {
+      r.pages++;
+      const { url, cacheName } = listPage(conf.slug, page, order);
+      let result;
+      try {
+        result = await fetchPage(url, cacheName, { refresh: true });
+      } catch (error) {
+        if (!(error instanceof NetworkError || error instanceof Blocked)) throw error;
+        stopped = error.message;
+        break outer;
+      }
+      if (!result.html) continue;
+      for (const listing of parseList(result.html)) {
+        if (byId.has(`zol-${listing.zolId}`) || skipped.has(listing.zolId) || seen.has(listing.zolId)) continue;
+        seen.add(listing.zolId);
+        if (exclude?.test(listing.name)) { r.excluded++; continue; }
+        fresh.push({ ...listing, fetchedAt: result.fetchedAt });
+      }
+    }
+    r.newListings = fresh.length;
+    // 名额只算“导入了”或“真的联网抓了参数页”的；有缓存的不适用型号不占名额
+    let used = 0;
+    for (const listing of fresh) {
+      if (used >= perCategory) break;
+      let page;
+      try {
+        page = await fetchPage(paramUrl(listing.zolId), `param-${listing.zolId}.html`);
+      } catch (error) {
+        if (!(error instanceof NetworkError || error instanceof Blocked)) throw error;
+        stopped = error.message;
+        break outer;
+      }
+      if (!page.cached) used++;
+      if (!page.html) { r.missingParams++; continue; }
+      const parsed = parseParams(page.html, conf.suffix);
+      if (!Object.keys(parsed.params).length) { r.missingParams++; continue; }
+      if (conf.accept && !conf.accept(parsed.params)) { r.notApplicable++; skipped.add(listing.zolId); continue; }
+      if (page.cached) used++;
+      const record = toRecord(listing, parsed, cat);
+      record.observedAt = fetchedAt;
+      byId.set(record.id, record);
+      added.push(`${cat} ${record.name}`);
+      r.imported++;
+    }
+  }
+  const items = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+  await store.write('zol-catalog.json', { ...snapshot, items, skippedIds: [...skipped].sort(), discoveredAt: fetchedAt });
+  if (stopped) process.exitCode = 2;
+  console.log(JSON.stringify({ stopped, networkRequests, added: added.length, report, newModels: added }, null, 2));
+}
+
 async function main() {
   if (pricesMode) return refreshPrices();
+  if (discoverMode) return discoverModels();
   const store = new LocalStore();
   const previous = await store.read('zol-catalog.json', { items: [] });
   const byId = new Map(previous.items.filter(item => item.category !== category || !excludeFilter?.test(item.name)).map(item => [item.id, item]));
