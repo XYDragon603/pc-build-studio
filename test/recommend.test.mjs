@@ -186,3 +186,15 @@ test('显卡没有任何功耗数据时，电源按游戏指数保守选，不�
   const r = bySlot(recommend(items, { budgetCents: 1200000, scenarios: ['2k'] }));
   assert.equal(r.PSU.specs.ratedWatts, 1000);
 });
+
+test('办公：预算再高 CPU 也最多 ¥1,200，不买游戏 CPU', () => {
+  const cpu = (cents, gaming, blender, name) => ({ ...item('CPU', cents, { socket: 'AM5', maxPowerWatts: 88, integratedGraphics: 'AMD Radeon Graphics' }), name, performance: { gaming: { index: gaming }, blender: { score: blender } } });
+  const office = cpu(110000, 60, 200, 'AMD Ryzen 5 8600G');
+  const x3d = cpu(320000, 100, 380, 'AMD Ryzen 7 9850X3D');
+  const items = [...catalog.filter(i => i.category !== 'CPU'), office, x3d];
+  const r = recommend(items, { budgetCents: 1000000, scenarios: ['office'], igpu: true });
+  assert.equal(bySlot(r).CPU.id, office.id);
+  assert.match(r.picks.find(p => p.slot === 'CPU').reason, /最多 ¥1,200/);
+  // 游戏用途同样预算会选 X3D
+  assert.equal(bySlot(recommend(items, { budgetCents: 1000000, scenarios: ['2k'] })).CPU.id, x3d.id);
+});

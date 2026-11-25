@@ -186,26 +186,29 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
 
   // CPU
   if (!locked.CPU) {
+    // 办公：够用就好，CPU 最多 ¥1,200、按多核挑；预算再高也不买游戏 CPU（X3D 对办公没用），省下的钱留着
+    const officeLike = ['office', 'general'].includes(profile.key);
+    const cpuCap = officeLike ? Math.min(cap('CPU'), 120000) : cap('CPU');
     const all = pools.CPU.filter(i => i.specs.socket && /^(AM5|AM4|LGA1700|LGA1851)$/.test(up(i.specs.socket))
       && (!igpu || hasIntegratedGraphics(i)));
     const current = all.filter(i => CURRENT_SOCKETS.test(up(i.specs.socket)));
-    const currentFits = current.some(i => price(i) <= cap('CPU'));
+    const currentFits = current.some(i => price(i) <= cpuCap);
     const pool = currentFits ? current : all;
     const platform = currentFits ? '优先 AM5 / LGA1700 / LGA1851 平台，' : '当前平台超出分配，放宽到 AM4，';
     // 游戏用途：预算内有游戏指数的型号就只按游戏指数比，否则按 Blender 多核分；
     // AI / 剪辑：反过来，多核分优先（渲染、编译、数据预处理吃核心数）
-    const multicore = profile.cpu === 'multicore';
-    const byGaming = multicore ? null : bestPerfWithin(pool, cap('CPU'), cpuGaming);
-    const byBlender = multicore ? bestPerfWithin(pool, cap('CPU'), cpuBlender) : null;
-    const byPerf = byGaming ?? byBlender ?? bestPerfWithin(pool, cap('CPU'), multicore ? cpuGaming : cpuBlender);
+    const multicore = profile.cpu === 'multicore' || officeLike;
+    const byGaming = multicore ? null : bestPerfWithin(pool, cpuCap, cpuGaming);
+    const byBlender = multicore ? bestPerfWithin(pool, cpuCap, cpuBlender) : null;
+    const byPerf = byGaming ?? byBlender ?? bestPerfWithin(pool, cpuCap, multicore ? cpuGaming : cpuBlender);
     if (byPerf) {
       const usedGaming = cpuGaming(byPerf) != null && (byGaming || (multicore && !byBlender));
       set('CPU', byPerf, usedGaming
         ? `分配 ${yuan(cap('CPU'))}，${platform}选预算内游戏指数最高的（${cpuGaming(byPerf)}%，1080p，9850X3D = 100）`
-        : `分配 ${yuan(cap('CPU'))}，${platform}${multicore ? `${profile.label}看多核，` : '预算内没有游戏指数数据，'}选 Blender 多核分最高的（${cpuBlender(byPerf)}）`);
+        : `分配 ${yuan(cpuCap)}${officeLike && cpuCap < cap('CPU') ? '（办公够用就好，最多 ¥1,200）' : ''}，${platform}${multicore ? `${profile.label}看多核，` : '预算内没有游戏指数数据，'}选 Blender 多核分最高的（${cpuBlender(byPerf)}）`);
     } else {
-      const r = bestWithin(pool, cap('CPU'));
-      if (r) set('CPU', r.item, `分配 ${yuan(cap('CPU'))}，${platform}没有性能数据，选预算内估算价最高的${r.over ? '（预算不足，取最便宜的）' : ''}`);
+      const r = bestWithin(pool, cpuCap);
+      if (r) set('CPU', r.item, `分配 ${yuan(cpuCap)}，${platform}没有性能数据，选预算内估算价最高的${r.over ? '（预算不足，取最便宜的）' : ''}`);
     }
   }
   const socket = up(specsOf('CPU')?.socket);
