@@ -56,29 +56,29 @@ try {
       assert.equal(build.totals.unknownPriceCount, 0);
       assert.deepEqual(build.scenarios, [scenario]);
       const missing = build.slots.filter(s => !s.part).map(s => s.label);
-      const conflicts = [], warnings = [], unknowns = [];
-      for (const [key, check] of Object.entries(build.compatibility)) {
-        if (plan.igpu && ['gpuClearance', 'gpuPowerConnector', 'power'].includes(key)) continue;
-        if (plan.stockCooler && ['coolerClearance', 'radiatorClearance'].includes(key)) continue;
-        const cooler = plan.picks.find(p => p.slot === 'COOLER')?.item;
-        if (key === 'radiatorClearance' && !cooler?.specs.radiatorSizeMm) continue;
-        if (key === 'coolerClearance' && cooler?.specs.radiatorSizeMm) continue;
-        const status = typeof check === 'string' ? check : check.status;
-        if (status === 'conflict') conflicts.push(labels[key]);
-        if (status === 'warning') warnings.push(labels[key]);
-        if (status === 'unknown') unknowns.push(labels[key]);
-      }
+      // 统一兼容性规则（五态）：方案本身的结果，以及转成可保存配置后再算一遍（前后端同一套规则，应一致）
+      const planChecks = plan.compatibility?.checks ?? [];
+      const byStatus = status => planChecks.filter(c => c.status === status).map(c => c.label);
+      const conflicts = byStatus('FAIL'), conditional = byStatus('CONDITIONAL'), unknowns = byStatus('UNKNOWN');
+      const savedOverall = build.compatibility.overall ?? null;
       const cpu = plan.picks.find(p => p.slot === 'CPU')?.item;
-      const cooler = plan.picks.find(p => p.slot === 'COOLER')?.item;
-      if (plan.igpu && !hasIntegratedGraphics(cpu)) conflicts.push('核显方案 CPU 没有核显');
-      if (cooler && cpu && !cooler.specs.sockets?.map(s => s.toUpperCase()).includes(cpu.specs.socket?.toUpperCase())) conflicts.push('散热器插槽');
+      if (plan.igpu && cpu && !hasIntegratedGraphics(cpu)) conflicts.push('核显方案 CPU 没有核显');
       const withinTarget = plan.totalCents <= plan.targetCents;
-      const passed = !missing.length && !conflicts.length && !warnings.length && withinTarget;
-      const checks = { passed, complete: !missing.length, missing, withinTarget, withinInputBudget: plan.totalCents <= request.budgetCents, inputBudgetDifferenceCents: request.budgetCents - plan.totalCents, conflicts, warnings, unknowns };
+      const infeasible = !!plan.infeasible;
+      const passed = !infeasible && !missing.length && !conflicts.length && withinTarget;
+      const checks = { passed, infeasible, complete: !missing.length, missing, withinTarget, withinInputBudget: plan.totalCents <= request.budgetCents,
+        inputBudgetDifferenceCents: request.budgetCents - plan.totalCents, overall: plan.compatibility?.overall ?? null, savedOverall, conflicts, conditional, unknowns,
+        score: plan.score?.total ?? null, sameAs: plan.sameAs ?? null };
       const variant = { id: plan.id, label: plan.label, targetCents: plan.targetCents, igpu: plan.igpu, stockCooler: plan.stockCooler, checks, build };
       variants.push(variant);
+      if (infeasible) {
+        markdown.push(`## ${plan.label}`, '', `目标预算：${money(plan.targetCents)}。**这一档没有可行方案。**`, '', ...(plan.reasons ?? []).map(r => `- ${r}`),
+          plan.minFeasibleCents ? `
+能找到的最低完整配置约 ${money(plan.minFeasibleCents)}。` : '', ...(plan.suggestions ?? []).map(r => `- 建议：${r}`), '');
+        continue;
+      }
       backup.builds.push(build);
-      markdown.push(`## ${plan.label}`, '', `目标预算：${money(plan.targetCents)}；估算合计：${money(plan.totalCents)}；输入预算余额：${money(checks.inputBudgetDifferenceCents)}。`, '', '| 配件 | 型号 | 估算价格 |', '|---|---|---:|', ...build.slots.map(s => `| ${s.label} | ${cell(s.part?.model ?? '缺失')} | ${s.part ? money(s.part.priceCents) : '—'} |`), '', `检查：${passed ? '通过已知条件检查' : '存在问题'}。${missing.length ? `缺件：${missing.join('、')}。` : ''}${!withinTarget ? '超出本档目标预算。' : ''}${conflicts.length ? `冲突：${conflicts.join('、')}。` : ''}${warnings.length ? `警告：${warnings.join('、')}。` : ''}`, '', `待核对 / 数据不足：${unknowns.join('、') || '无'}。`, '', ...plan.notes.map(n => `- ${n}`), '', '选件依据：', '', ...plan.picks.map(p => `- ${slotTypes.find(s => s.id === p.slot)?.label ?? p.slot}：${p.reason}`), '');
+      markdown.push(`## ${plan.label}`, '', `目标预算：${money(plan.targetCents)}；估算合计：${money(plan.totalCents)}；输入预算余额：${money(checks.inputBudgetDifferenceCents)}。`, '', '| 配件 | 型号 | 估算价格 |', '|---|---|---:|', ...build.slots.map(s => `| ${s.label} | ${cell(s.part?.model ?? '缺失')} | ${s.part ? money(s.part.priceCents) : '—'} |`), '', `综合评分：${plan.score?.total ?? '—'}${plan.sameAs ? `（与${plan.sameAs === 'save' ? '省钱版' : plan.sameAs === 'balanced' ? '推荐版' : '进阶版'}相同）` : ''}；兼容性：${checks.overall}。`, '', `检查：${passed ? '通过' : '存在问题'}。${missing.length ? `缺件：${missing.join('、')}。` : ''}${!withinTarget ? '超出本档目标预算。' : ''}${conflicts.length ? `不兼容：${conflicts.join('、')}。` : ''}`, '', `需满足条件：${conditional.join('、') || '无'}。待核实：${unknowns.join('、') || '无'}。`, '', ...plan.notes.map(n => `- ${n}`), '', '选件依据：', '', ...plan.picks.map(p => `- ${slotTypes.find(s => s.id === p.slot)?.label ?? p.slot}：${p.reason}`), '');
     }
     const result = { index: index + 1, label, testedAt, request, durationMs, rawResponse, variants };
     results.push(result);
@@ -93,15 +93,17 @@ try {
   assert.equal(restored.restored, backup.builds.length);
   const readback = await fetch(`${base}/builds/backup`).then(r => r.json());
   assert.deepEqual(readback.builds.map(b => normalizeBuild(b)), backup.builds.map(b => normalizeBuild(b)));
-  const sourceFiles = ['.runtime/zol-catalog.json', '.runtime/buildcores-catalog.json', '.runtime/blender-scores.json', 'data/perf-gaming.json', 'src/recommend.mjs', 'src/catalog.mjs', 'src/api.mjs', 'web/src/domain/plan.ts', 'web/src/domain/catalog.ts', 'web/src/api/mapping.ts'];
+  const sourceFiles = ['.runtime/zol-catalog.json', '.runtime/buildcores-catalog.json', '.runtime/blender-scores.json', 'data/perf-gaming.json', 'src/recommend.mjs', 'src/optimizer.mjs', 'src/scoring-profiles.mjs', 'src/compat-rules.mjs', 'src/catalog.mjs', 'src/api.mjs', 'web/src/domain/plan.ts', 'web/src/domain/catalog.ts', 'web/src/api/mapping.ts'];
   const fingerprints = [];
   for (const file of sourceFiles) fingerprints.push({ file, sha256: createHash('sha256').update(await readFile(file)).digest('hex') });
   const all = results.flatMap(r => r.variants);
   const summary = { testedAt, timezone: 'Asia/Bangkok', caseCount: results.length, variantCount: all.length, passedCount: all.filter(v => v.checks.passed).length, failedCount: all.filter(v => !v.checks.passed).length, quiet: false, peripherals: false, restoreReadbackPassed: true, fingerprints, cases: results.map(({ rawResponse, ...r }) => r) };
   await writeFile(join(output, '全部方案_可导入备份.json'), JSON.stringify(backup, null, 2) + '\n');
   await writeFile(join(output, '测试结果.json'), JSON.stringify(summary, null, 2) + '\n');
-  const report = ['# 12 组装机配置测试', '', `测试时间：${new Date(testedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok', hour12: false })}（Asia/Bangkok）。`, '', '安静优先：全部关闭。顺带配外设：全部关闭。', '', `使用首页实际 POST /api/v1/plans 接口和本机目录，12 组输入共返回 ${all.length} 套方案；${summary.passedCount} 套通过已知条件检查，${summary.failedCount} 套存在问题。全部方案已通过备份导入和重读一致性检查。`, '', '“通过”要求无缺件、无已知兼容冲突、无电源警告且不超本档目标预算；未知规格与 BIOS 单独列为待核对。未进行实机装配、帧率、AI 性能或实时商城价格测试。', '', '每组 Markdown 含全部返回档位的配件清单与选件依据；同名 JSON 含请求、原始响应、可保存配置及检查结果。全部方案_可导入备份.json 可在工作台“我的方案”中恢复。测试存储放在 .test-store，现有方案和草稿未改动。', '', '进阶版目标预算通常比输入预算高 20%，省钱版约为 80%；下表同时标明两个预算，避免把进阶版误当作输入预算内方案。', '', '| 序号 | 输入预算 / 用途 | 版本 | 目标预算 | 估算合计 | 检查 | 待核对 |', '|---|---|---|---:|---:|---|---|'];
-  for (const r of results) for (const v of r.variants) report.push(`| ${r.index} | ${money(r.request.budgetCents)} / ${r.label} | ${v.label} | ${money(v.targetCents)} | ${money(v.build.totals.totalCents)} | ${v.checks.passed ? '通过' : [...v.checks.missing.map(s => `缺${s}`), ...v.checks.conflicts, ...v.checks.warnings, ...(!v.checks.withinTarget ? ['超目标预算'] : [])].join('、')} | ${v.checks.unknowns.join('、')} |`);
+  const report = ['# 12 组装机配置测试', '', `测试时间：${new Date(testedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok', hour12: false })}（Asia/Bangkok）。`, '', '安静优先：全部关闭。顺带配外设：全部关闭。', '', `使用首页实际 POST /api/v1/plans 接口和本机目录，12 组输入共返回 ${all.length} 套方案；${summary.passedCount} 套通过已知条件检查，${summary.failedCount} 套存在问题。全部方案已通过备份导入和重读一致性检查。`, '', '“通过”要求无缺件、统一兼容规则下无 FAIL（不兼容）且不超本档目标预算；CONDITIONAL（需满足条件，如开 XMP / EXPO、BIOS 需更新）与 UNKNOWN（规格缺失待核实）单独列出。未进行实机装配、帧率、AI 性能或实时商城价格测试。', '', '每组 Markdown 含全部返回档位的配件清单与选件依据；同名 JSON 含请求、原始响应、可保存配置及检查结果。全部方案_可导入备份.json 可在工作台“我的方案”中恢复。测试存储放在 .test-store，现有方案和草稿未改动。', '', '进阶版目标预算通常比输入预算高 20%，省钱版约为 80%；下表同时标明两个预算，避免把进阶版误当作输入预算内方案。', '', '| 序号 | 输入预算 / 用途 | 版本 | 目标预算 | 估算合计 | 评分 | 兼容性 | 检查 | 需满足条件 / 待核实 |', '|---|---|---|---:|---:|---:|---|---|---|'];
+  for (const r of results) for (const v of r.variants) report.push(v.checks.infeasible
+    ? `| ${r.index} | ${money(r.request.budgetCents)} / ${r.label} | ${v.label} | ${money(v.targetCents)} | — | — | — | 无可行方案 | |`
+    : `| ${r.index} | ${money(r.request.budgetCents)} / ${r.label} | ${v.label} | ${money(v.targetCents)} | ${money(v.build.totals.totalCents)} | ${v.checks.score ?? '—'}${v.checks.sameAs ? '（同上一档）' : ''} | ${v.checks.overall} | ${v.checks.passed ? '通过' : [...v.checks.missing.map(s => `缺${s}`), ...v.checks.conflicts, ...(!v.checks.withinTarget ? ['超目标预算'] : [])].join('、')} | ${[...v.checks.conditional, ...v.checks.unknowns].join('、')} |`);
   report.push('', '重新运行：在项目根目录执行 `node scripts/test-configurations.mjs`。这会更新本目录的同名测试输出。', '');
   await writeFile(join(output, '测试汇总.md'), report.join('\n'));
   console.log(JSON.stringify({ cases: summary.caseCount, variants: summary.variantCount, passed: summary.passedCount, failed: summary.failedCount, restoreReadbackPassed: true }));

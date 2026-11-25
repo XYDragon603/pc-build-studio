@@ -8,6 +8,7 @@
 //   quality  电源、主板、散热的品质与余量
 //   noise    噪音（安静优先时加权）
 //   trust    数据可信度：价格可信度、兼容性条件项与待核实项
+// vramRefGB：AI 显存分的满分显存（32GB：消费级最大显存，能放下更大的量化模型）。
 // gpuCurve：显卡分 = (指数 / 参照)^gpuCurve。4K 吃显卡用线性；2K、电竞用 <1 的指数，体现边际收益递减。
 // 性能指标都是“同一目录里的相对值”，只用于在候选之间比较，不代表实际帧数或 AI 吞吐。
 //
@@ -16,7 +17,7 @@
 //   Blender    Blender Open Data（CC0），中位数，≥3 次提交
 //   显存、功耗  目录规格（ZOL 参数页 / BuildCores）
 
-export const SCORING_VERSION = '2026-11-26';
+export const SCORING_VERSION = '2026-11-27';
 
 const W = (gpu, cpu, memory, storage, quality, noise, trust) => ({ gpu, cpu, memory, storage, quality, noise, trust });
 
@@ -24,7 +25,7 @@ export const SCORING_PROFILES = {
   '2k': { label: '2K 游戏', weights: W(0.50, 0.18, 0.07, 0.05, 0.10, 0.02, 0.08), gpuMetric: 'gaming', cpuMetric: 'gaming', ramGB: 32, ssdGB: 1000, gpuCurve: 0.7 },
   '4k': { label: '4K / 光追游戏', weights: W(0.60, 0.12, 0.06, 0.05, 0.09, 0.02, 0.06), gpuMetric: 'gaming', cpuMetric: 'gaming', ramGB: 32, ssdGB: 2000, gpuCurve: 1 },
   '1080p': { label: '1080p 电竞', weights: W(0.40, 0.30, 0.07, 0.04, 0.09, 0.02, 0.08), gpuMetric: 'gaming', cpuMetric: 'gaming', ramGB: 32, ssdGB: 1000, gpuCurve: 0.6 },
-  ai: { label: 'AI / 机器学习', weights: W(0.52, 0.08, 0.14, 0.07, 0.10, 0.01, 0.08), gpuMetric: 'ai', cpuMetric: 'multicore', ramGB: 64, ssdGB: 2000 },
+  ai: { label: 'AI / 机器学习', weights: W(0.52, 0.08, 0.14, 0.07, 0.10, 0.01, 0.08), gpuMetric: 'ai', cpuMetric: 'multicore', ramGB: 64, ssdGB: 2000, vramRefGB: 32 },
   creator: { label: '视频剪辑 / 设计', weights: W(0.22, 0.32, 0.15, 0.12, 0.10, 0.01, 0.08), gpuMetric: 'creator', cpuMetric: 'multicore', ramGB: 64, ssdGB: 2000 },
   office: { label: '办公学习', weights: W(0.00, 0.35, 0.15, 0.15, 0.15, 0.08, 0.12), gpuMetric: 'none', cpuMetric: 'multicore', ramGB: 16, ssdGB: 512 },
 };

@@ -288,7 +288,7 @@ function scoreBuild(b, ctx) {
   else if (!b.gpu) parts.gpu = 0.03;
   else if (profile.gpuMetric === 'ai') {
     const compute = b.gpu.performance?.blender?.score;
-    parts.gpu = 0.75 * clamp(b.gpu.specs.capacityGB / 24) + 0.25 * (compute ? clamp(compute / refs.gpuCompute) : 0.3);
+    parts.gpu = 0.75 * clamp(b.gpu.specs.capacityGB / (profile.vramRefGB ?? 24)) + 0.25 * (compute ? clamp(compute / refs.gpuCompute) : 0.3);
   } else if (profile.gpuMetric === 'creator') {
     const compute = b.gpu.performance?.blender?.score;
     parts.gpu = (compute ? clamp(compute / refs.gpuCompute) : 0.3) * (b.gpu.specs.capacityGB >= 12 ? 1 : 0.9);
