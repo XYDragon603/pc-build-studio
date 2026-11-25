@@ -5,7 +5,7 @@ import { SLOT_TO_API } from '../api/mapping';
 import { buildReducer, totals } from '../domain/build';
 import { catalogToCandidate } from '../domain/catalog';
 import { formatYuan } from '../domain/money';
-import { SLOTS, slotDef } from '../domain/slots';
+import { ALL_SLOTS, slotDef } from '../domain/slots';
 import type { Build, SlotId } from '../domain/types';
 import { ESTIMATE_LABELS, estimateText, fitForSlot, STALE_NOTE, queryCatalog, type Market, type SortKey } from './data';
 import { SearchSuggest } from './SearchSuggest';
@@ -88,7 +88,7 @@ export function PartPicker({ slot, build, onClose, onPick, onIntegrated, onCateg
         {!onCategory && <header className="nx-section-head"><h2>{heading}</h2><button type="button" className="nx-icon-btn" aria-label="关闭换件" onClick={onClose}><X size={19} /></button></header>}
         {onCategory && (
           <div className="nx-category-tabs" role="group" aria-label="配件分类">
-            {SLOTS.map(({ id, label }) => <button type="button" key={id} className={id === slot ? 'on' : ''} aria-pressed={id === slot} onClick={() => onCategory(id)}>{label}</button>)}
+            {ALL_SLOTS.map(({ id, label }) => <button type="button" key={id} className={id === slot ? 'on' : ''} aria-pressed={id === slot} onClick={() => onCategory(id)}>{label}</button>)}
           </div>
         )}
         <form className="nx-picker-controls" onSubmit={e => { e.preventDefault(); setQuery(q); }}>

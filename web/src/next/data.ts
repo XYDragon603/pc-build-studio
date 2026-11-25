@@ -4,7 +4,7 @@ import { api, type CatalogItem, type EstimateBasis } from '../api/client';
 import { estimatePower } from '../domain/compat';
 import { isIntegratedGpu, STOCK_COOLER_NAME } from '../domain/plan';
 import { catalogSpecs } from '../domain/catalog';
-import { SLOTS } from '../domain/slots';
+import { ALL_SLOTS } from '../domain/slots';
 import type { Build, PartSpecs, SlotId } from '../domain/types';
 
 export type SortKey = 'value' | 'price' | '-price' | 'perf';
@@ -24,7 +24,8 @@ export interface PriceChange { slot: SlotId; label: string; name: string; fromCe
  * 手动填的实付价、锁定的配件不算，和 setEstimate 的规则一致。
  */
 export function priceChanges(build: Build, items: Record<string, CatalogItem | null | undefined>): PriceChange[] {
-  return SLOTS.flatMap(({ id, label }) => {
+  return ALL_SLOTS.flatMap(({ id, label }) => {
+    if (!build.slots[id]) return [];
     const { part, locked } = build.slots[id];
     const item = part?.catalogId ? items[part.catalogId] : null;
     const toCents = item?.estimatedPriceCents;
@@ -35,8 +36,8 @@ export function priceChanges(build: Build, items: Record<string, CatalogItem | n
 
 /** 存档里规格落后于配件库的配件（如后来补的功耗、尺寸），返回要合并进去的新规格 */
 export function staleSpecs(build: Build, items: Record<string, CatalogItem | null | undefined>): { slot: SlotId; specs: PartSpecs }[] {
-  return SLOTS.flatMap(({ id }) => {
-    const part = build.slots[id].part;
+  return ALL_SLOTS.flatMap(({ id }) => {
+    const part = build.slots[id]?.part;
     const item = part?.catalogId ? items[part.catalogId] : null;
     if (!part || !item) return [];
     const fresh = catalogSpecs(id, item.specs);

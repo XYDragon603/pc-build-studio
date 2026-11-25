@@ -2,7 +2,7 @@ import { totals } from './build';
 import { compatibility } from './compat';
 import { formatYuan } from './money';
 import { SCENARIOS } from './scenarios';
-import { SLOTS } from './slots';
+import { PERIPHERALS, SLOTS } from './slots';
 import type { Build } from './types';
 
 const price = (c: number | null, estimate = false) =>
@@ -29,8 +29,13 @@ export function buildMarkdown(b: Build, demo: boolean): string {
         : `| ${label} | 待选择 | — | — | |`;
     }),
     ...b.custom.map(c => `| 自定义 | ${c.name} | ${c.spec || '—'} | ${price(c.priceCents)} | |`),
+    ...PERIPHERALS.flatMap(({ id, label }) => {
+      const part = b.slots[id]?.part;
+      return part ? [`| ${label}（外设） | ${part.name} | ${part.spec || '—'} | ${price(part.priceCents, part.priceSource === 'estimate')} | ${b.slots[id].locked ? '是' : ''} |`] : [];
+    }),
     '',
     `**已选合计 ${formatYuan(t.totalCents)}** · ${t.remainingCents >= 0 ? `剩余预算 ${formatYuan(t.remainingCents)}` : `超出预算 ${formatYuan(-t.remainingCents)}`}`,
+    t.peripheralCount ? `外设 ${formatYuan(t.peripheralCents)}（不占主机预算）· 主机 + 外设合计 **${formatYuan(t.grandTotalCents)}**` : '',
     t.missing.length ? `尚未选择：${t.missing.map(id => SLOTS.find(s => s.id === id)!.label).join('、')}` : '',
     t.unknownPriceCount ? `${t.unknownPriceCount} 项价格未知，未计入合计。` : '',
     t.estimateCount ? `${t.estimateCount} 项为参考价估算，实际价格以下单为准。` : '',

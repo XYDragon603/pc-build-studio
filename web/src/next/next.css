@@ -306,3 +306,16 @@
 .nx-price-changes > svg { flex: none; color: var(--amber, #a86200); }
 .nx-price-changes > span { flex: 1; min-width: 0; }
 .nx-price-changes .nx-btn { flex: none; height: 32px; padding: 0 12px; font-size: 13px; }
+
+/* 配置清单里的外设分组 */
+.nx-build-table .nx-group-row th { padding: 10px 8px 6px; text-align: left; font-size: 14px; font-weight: 700; color: var(--brand-deep, var(--ink));
+  border-top: 2px solid var(--line); background: var(--surface-2, #f4f7fb); }
+.nx-build-table .nx-group-row small { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--ink-2); }
+
+/* 方案卡片里的外设 */
+.nx-plan-peripherals { display: grid; gap: 4px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2, #f4f7fb); font-size: 13px; }
+.nx-plan-peripherals > span { display: flex; align-items: baseline; gap: 6px; color: var(--ink-2); }
+.nx-plan-peripherals > span strong { color: var(--ink); font-size: 14px; }
+.nx-plan-peripherals > span small { margin-left: auto; font-size: 11px; }
+.nx-plan-peripherals ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.nx-plan-peripherals li { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 6px; }

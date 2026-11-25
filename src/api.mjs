@@ -6,6 +6,7 @@ import { replayQuotes, searchQuotes } from './quotes.mjs';
 import { BraveSearch } from './search.mjs';
 import { LocalStore } from './store.mjs';
 import { createCatalog } from './catalog.mjs';
+import { PERIPHERAL_SLOTS, recommendPeripherals } from './peripherals.mjs';
 import { JdUnion } from './jdunion.mjs';
 import { recommend, recommendPlans, SLOTS as RECOMMEND_SLOTS } from './recommend.mjs';
 import { readFile } from 'node:fs/promises';
@@ -147,10 +148,18 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         return;
       }
       if (pathname === '/api/v1/plans' && method === 'POST') {
-        const { budgetCents, scenarios = [] } = await readJson(request);
+        const { budgetCents, scenarios = [], peripherals = [] } = await readJson(request);
         if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
         if (!Array.isArray(scenarios) || scenarios.length > 8 || !scenarios.every(s => typeof s === 'string' && s.length <= 32)) throw invalid('scenarios 格式无效');
-        return json(response, 200, { plans: recommendPlans(catalog.all().filter(forPlans), { budgetCents, scenarios }) });
+        if (!Array.isArray(peripherals) || !peripherals.every(slot => PERIPHERAL_SLOTS.includes(slot))) throw invalid('peripherals 只能包含 MONITOR、KEYBOARD、MOUSE');
+        const items = catalog.all().filter(forPlans);
+        const plans = recommendPlans(items, { budgetCents, scenarios });
+        if (!peripherals.length) return json(response, 200, { plans });
+        // 外设不占主机预算：每套方案按自己的显卡和档位单独挑
+        return json(response, 200, { plans: plans.map(plan => ({ ...plan, peripherals: recommendPeripherals(items, {
+          scenarios, tier: plan.id, igpu: plan.igpu, slots: peripherals,
+          gpuIndex: plan.picks.find(pick => pick.slot === 'GPU')?.item.performance?.gaming?.index ?? null,
+        }) })) });
       }
       // data/images/ 下的本地商品图（data/part-images.json 引用）
       const imageMatch = /^\/api\/v1\/images\/([\w.-]+\.(?:jpe?g|png|webp|gif))$/i.exec(pathname);

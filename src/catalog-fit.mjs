@@ -17,8 +17,11 @@ export function parseCatalogFit(value, category) {
   if (value === null) return null;
   let fit;
   try { fit = value.length <= 400 ? JSON.parse(value) : null; } catch { fit = null; }
-  if (!fit || typeof fit !== 'object' || Array.isArray(fit) || !Object.hasOwn(categoryFields, category)) {
-    throw invalid('fit 需为当前配件类目的兼容条件对象');
+  if (!fit || typeof fit !== 'object' || Array.isArray(fit)) throw invalid('fit 需为当前配件类目的兼容条件对象');
+  // 外设（显示器、键盘、鼠标）没有兼容条件：空对象等于不筛选
+  if (!Object.hasOwn(categoryFields, category)) {
+    if (Object.keys(fit).length) throw invalid('fit 需为当前配件类目的兼容条件对象');
+    return null;
   }
   for (const [field, expected] of Object.entries(fit)) {
     const valid = expected === null || (textFields.has(field)

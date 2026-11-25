@@ -88,6 +88,9 @@ test('外设是可选槽位：可以保存，单独计价，不占主机预算',
   assert.deepEqual([saved.totals.totalCents, saved.totals.peripheralCents, saved.totals.grandTotalCents, saved.totals.remainingCents],
     [394400, 132800, 527200, 405600]);
   assert.equal(saved.totals.filledStandardSlots, demo.totals.filledStandardSlots);
+  // 外设类目没有兼容条件：配件库照常带 fit={} 查询，不报错；带了条件才报错
+  assert.equal((await request('/catalog?category=MONITOR&fit=%7B%7D')).status, 200);
+  assert.equal((await request('/catalog?category=MOUSE&fit=' + encodeURIComponent('{"socket":"AM5"}'))).status, 400);
   // 不带外设的旧方案照样能保存
   assert.equal((await request('/builds', 'POST', { ...input, slots: demo.slots })).status, 201);
   // 外设 ID 也不能重复

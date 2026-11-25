@@ -56,6 +56,19 @@ export function PlanCard({ plan, budgetCents, scenarios, onChoose }: { plan: Pla
 
       <p className={`nx-compat ${summary.level}`}><StatusIcon size={16} /> {summary.text}</p>
 
+      {plan.peripherals && plan.peripherals.picks.length > 0 && (
+        <div className="nx-plan-peripherals" title={plan.peripherals.picks.map(p => `${p.item.name}：${p.reason}`).join('\n')}>
+          <span>外设 <strong>+{formatYuan(plan.peripherals.totalCents)}</strong><small>不占主机预算</small></span>
+          <ul>
+            {plan.peripherals.picks.map(pick => {
+              const id = API_TO_SLOT[pick.slot];
+              const Icon = SLOT_ICONS[id];
+              return <li key={pick.slot}><Icon size={14} aria-hidden /><span className="nx-part-name">{pick.item.name}</span></li>;
+            })}
+          </ul>
+        </div>
+      )}
+
       <div className="nx-notes">
         <button type="button" className="nx-link" aria-expanded={showNotes} onClick={() => setShowNotes(v => !v)}>
           <ChevronDown size={14} className={showNotes ? 'rot' : ''} /> 查看其余配件

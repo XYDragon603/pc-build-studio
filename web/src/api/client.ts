@@ -195,6 +195,8 @@ export interface PlanResult extends RecommendResult {
   igpu: boolean;
   /** 盒装 CPU 自带散热器，不另买 */
   stockCooler: boolean;
+  /** 请求了外设时：按这套方案的显卡和档位挑的显示器 / 键盘 / 鼠标（不占主机预算） */
+  peripherals?: { picks: RecommendResult['picks']; totalCents: number };
 }
 
 export interface Health {
@@ -240,7 +242,7 @@ export const api = {
   updateBuild: (id: string, input: ApiBuildInput & { version: number }) => call<ApiBuild>(`/builds/${id}`, { method: 'PUT', body: input }),
   deleteBuild: (id: string, version: number) => call<void>(`/builds/${id}`, { method: 'DELETE', body: { version } }),
   jdPrices: (skuIds: string[]) => call<JdLookup>('/quotes/jd', { method: 'POST', body: { skuIds }, timeoutMs: 15000 }),
-  plans: (body: { budgetCents: number; scenarios: string[] }) =>
+  plans: (body: { budgetCents: number; scenarios: string[]; peripherals?: ('MONITOR' | 'KEYBOARD' | 'MOUSE')[] }) =>
     call<{ plans: PlanResult[] }>('/plans', { method: 'POST', body, timeoutMs: 30000 }).then(r => r.plans),
   recommend: (body: { budgetCents: number; scenarios: string[]; locked: Record<string, { priceCents: number; specs: object }> }) =>
     call<RecommendResult>('/recommend', { method: 'POST', body, timeoutMs: 20000 }),

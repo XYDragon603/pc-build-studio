@@ -7,7 +7,7 @@ import type { PlanSummary } from '../components/PlansDialog';
 import { totals } from '../domain/build';
 import { estimatePower } from '../domain/compat';
 import { formatYuan } from '../domain/money';
-import { SLOTS } from '../domain/slots';
+import { ALL_SLOTS } from '../domain/slots';
 import type { Build } from '../domain/types';
 import { useCatalogItems } from './data';
 import { Thumb } from './Thumb';
@@ -94,7 +94,7 @@ export function SavedPlans({ plans, error, currentId, draft, onLoad, onDelete, o
 function SavedPreview({ build }: { build: Build }) {
   const info = totals(build);
   const power = estimatePower(build);
-  const items = useCatalogItems(SLOTS.map(s => build.slots[s.id].part?.catalogId));
+  const items = useCatalogItems(ALL_SLOTS.map(s => build.slots[s.id]?.part?.catalogId));
   return (
     <>
       <header className="nx-section-head nx-saved-preview-head">
@@ -102,15 +102,15 @@ function SavedPreview({ build }: { build: Build }) {
         <div><h2>{build.name}</h2><span className="nx-tag ok"><CheckCircle2 size={14} />已保存</span></div>
       </header>
       <ul>
-        {SLOTS.flatMap(({ id, label }) => {
-          const part = build.slots[id].part;
+        {ALL_SLOTS.flatMap(({ id, label }) => {
+          const part = build.slots[id]?.part;
           if (!part) return [];
           const item = part.catalogId ? items[part.catalogId] : null;
           const Icon = SLOT_ICONS[id];
           return [<li key={id}><Icon size={17} aria-hidden /><span>{label}</span><Thumb slot={id} src={item?.imageUrl} size="sm" /><strong>{part.name}</strong></li>];
         })}
       </ul>
-      <footer className="nx-saved-summary"><span>预计总价<strong>{formatYuan(info.totalCents)}</strong></span><span><Zap size={15} />预估满载功耗<strong>{power.estimatedLoadWatts == null ? '待补充规格' : `${power.estimatedLoadWatts} W`}</strong></span></footer>
+      <footer className="nx-saved-summary"><span>预计总价<strong>{formatYuan(info.totalCents)}</strong></span>{info.peripheralCount > 0 && <span>外设<strong>{formatYuan(info.peripheralCents)}</strong></span>}<span><Zap size={15} />预估满载功耗<strong>{power.estimatedLoadWatts == null ? '待补充规格' : `${power.estimatedLoadWatts} W`}</strong></span></footer>
     </>
   );
 }

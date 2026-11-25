@@ -37,6 +37,11 @@ export function planToBuild(plan: PlanResult, budgetCents: number, scenarios: st
     if (!slot || !pick.item.estimatedPriceCents) continue;
     b.slots[slot] = { locked: false, part: partFromCandidate(catalogToCandidate(pick.item, slot), pick.item.estimatedPriceCents, 'estimate', `自动配置：${pick.reason}`) };
   }
+  for (const pick of plan.peripherals?.picks ?? []) {
+    const slot = API_TO_SLOT[pick.slot];
+    if (!slot || !pick.item.estimatedPriceCents) continue;
+    b.slots[slot] = { locked: false, part: partFromCandidate(catalogToCandidate(pick.item, slot), pick.item.estimatedPriceCents, 'estimate', `自动配置：${pick.reason}`) };
+  }
   if (plan.igpu) b.slots.gpu = { locked: false, part: placeholder(INTEGRATED_GPU_NAME, '不配独立显卡') };
   if (plan.stockCooler) b.slots.cooler = { locked: false, part: placeholder(STOCK_COOLER_NAME, '盒装自带，无需另买') };
   return b;

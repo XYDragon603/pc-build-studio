@@ -5,7 +5,7 @@ import { totals, type BuildAction } from '../domain/build';
 import { estimatePower, type Check } from '../domain/compat';
 import { formatYuan } from '../domain/money';
 import { buildChecks, compatSummary, INTEGRATED_GPU_NAME, STOCK_COOLER_NAME } from '../domain/plan';
-import { SLOTS } from '../domain/slots';
+import { ALL_SLOTS, PERIPHERALS, SLOTS } from '../domain/slots';
 import type { Build, SlotId } from '../domain/types';
 import { ESTIMATE_LABELS, PRICE_NOTE, priceChanges, STALE_NOTE, staleSpecs, useCatalogItems } from './data';
 import { Thumb } from './Thumb';
@@ -42,7 +42,7 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
   const checks = useMemo(() => buildChecks(build), [build]);
   const summary = compatSummary(checks);
   const bios = checks.find(c => c.id === 'bios');
-  const items = useCatalogItems(SLOTS.map(s => build.slots[s.id].part?.catalogId));
+  const items = useCatalogItems(ALL_SLOTS.map(s => build.slots[s.id]?.part?.catalogId));
   const power = estimatePower(build);
   // 打开方案时自动用配件库最新规格补全（规格不是用户填的，直接更新；价格要用户确认，见下）
   useEffect(() => {
@@ -60,6 +60,48 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
   const over = t.remainingCents < 0;
   const status = summary.level === 'ok' && bios ? 'warn' : summary.level;
   const StatusIcon = CHECK_ICONS[status];
+
+  const renderRow = (id: SlotId, label: string) => {
+    const { part, locked } = build.slots[id];
+    const item = part?.catalogId ? items[part.catalogId] : null;
+    const placeholder = part?.name === INTEGRATED_GPU_NAME || part?.name === STOCK_COOLER_NAME;
+    const reference = part?.priceSource === 'estimate' || part?.priceSource === 'demo' ? part.priceCents : item?.estimatedPriceCents;
+    const actual = part?.priceSource === 'manual' ? part.priceCents : null;
+    const basis = part?.priceSource === 'demo' ? '演示价' : item?.estimateBasis && item.estimatedPriceCents === reference
+      ? ESTIMATE_LABELS[item.estimateBasis] : '保存时的估算价';
+    const Icon = SLOT_ICONS[id];
+    return (
+      <tr key={id} className={activeSlot === id ? 'is-active' : ''}>
+        <th scope="row"><span className="nx-slot-caption"><Icon size={19} aria-hidden />{label}</span></th>
+        <td>
+          <button type="button" className="nx-row-product" onClick={() => onPick(id)} disabled={locked} aria-label={part ? `更换${label}：${part.name}` : `选择${label}`}>
+            <Thumb src={item?.imageUrl} slot={id} size="md" />
+            <span className="nx-row-body">
+              <strong title={part?.name}>{part?.name ?? '选择配件'}</strong>
+              {part && <span title={item?.summary || part.spec}>{item?.summary || part.spec}</span>}
+            </span>
+          </button>
+        </td>
+        <td className="nx-amount" title={reference == null || placeholder ? undefined : item?.possiblyStale ? `${basis} · ${STALE_NOTE}` : basis}>
+          {reference == null || placeholder ? '—' : formatYuan(reference)}
+          {item?.possiblyStale && !placeholder && <small className="nx-stale">可能是旧价</small>}
+        </td>
+        <td className="nx-amount">
+          {part && !placeholder
+            ? <button type="button" className={`nx-price-edit${actual == null ? ' is-unset' : ''}`} onClick={() => onEditPrice(id)} disabled={locked} aria-label={`编辑${label}实付价`}>{actual == null ? '填写' : formatYuan(actual)}</button>
+            : '—'}
+        </td>
+        <td>
+          <span className="nx-row-actions">
+            {locked
+              ? <button type="button" className="nx-icon-btn" title="解锁" aria-label={`解锁${label}`} onClick={() => dispatch({ type: 'toggleLock', slot: id })}><Lock size={15} /></button>
+              : <button type="button" className="nx-icon-btn" title={part ? '更换' : '选择'} aria-label={`${part ? '更换' : '选择'}${label}`} onClick={() => onPick(id)}><Repeat size={15} /></button>}
+            {part && !locked && <button type="button" className="nx-icon-btn nx-remove" aria-label={`移除${label}`} title="移除" onClick={() => dispatch({ type: 'removePart', slot: id })}><Trash2 size={15} /></button>}
+          </span>
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <div className="nx-page nx-editor">
@@ -91,54 +133,17 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
             <table className="nx-build-table" aria-label="当前方案配件">
               <thead><tr><th scope="col">配件</th><th scope="col">产品与规格</th><th scope="col" title={PRICE_NOTE}>参考价</th><th scope="col">实付价</th><th scope="col"><span className="sr-only">操作</span></th></tr></thead>
               <tbody>
-                {SLOTS.map(({ id, label }) => {
-                  const { part, locked } = build.slots[id];
-                  const item = part?.catalogId ? items[part.catalogId] : null;
-                  const placeholder = part?.name === INTEGRATED_GPU_NAME || part?.name === STOCK_COOLER_NAME;
-                  const reference = part?.priceSource === 'estimate' || part?.priceSource === 'demo' ? part.priceCents : item?.estimatedPriceCents;
-                  const actual = part?.priceSource === 'manual' ? part.priceCents : null;
-                  const basis = part?.priceSource === 'demo' ? '演示价' : item?.estimateBasis && item.estimatedPriceCents === reference
-                    ? ESTIMATE_LABELS[item.estimateBasis] : '保存时的估算价';
-                  const Icon = SLOT_ICONS[id];
-                  return (
-                    <tr key={id} className={activeSlot === id ? 'is-active' : ''}>
-                      <th scope="row"><span className="nx-slot-caption"><Icon size={19} aria-hidden />{label}</span></th>
-                      <td>
-                        <button type="button" className="nx-row-product" onClick={() => onPick(id)} disabled={locked} aria-label={part ? `更换${label}：${part.name}` : `选择${label}`}>
-                          <Thumb src={item?.imageUrl} slot={id} size="md" />
-                          <span className="nx-row-body">
-                            <strong title={part?.name}>{part?.name ?? '选择配件'}</strong>
-                            {part && <span title={item?.summary || part.spec}>{item?.summary || part.spec}</span>}
-                          </span>
-                        </button>
-                      </td>
-                      <td className="nx-amount" title={reference == null || placeholder ? undefined : item?.possiblyStale ? `${basis} · ${STALE_NOTE}` : basis}>
-                        {reference == null || placeholder ? '—' : formatYuan(reference)}
-                        {item?.possiblyStale && !placeholder && <small className="nx-stale">可能是旧价</small>}
-                      </td>
-                      <td className="nx-amount">
-                        {part && !placeholder
-                          ? <button type="button" className={`nx-price-edit${actual == null ? ' is-unset' : ''}`} onClick={() => onEditPrice(id)} disabled={locked} aria-label={`编辑${label}实付价`}>{actual == null ? '填写' : formatYuan(actual)}</button>
-                          : '—'}
-                      </td>
-                      <td>
-                        <span className="nx-row-actions">
-                          {locked
-                            ? <button type="button" className="nx-icon-btn" title="解锁" aria-label={`解锁${label}`} onClick={() => dispatch({ type: 'toggleLock', slot: id })}><Lock size={15} /></button>
-                            : <button type="button" className="nx-icon-btn" title={part ? '更换' : '选择'} aria-label={`${part ? '更换' : '选择'}${label}`} onClick={() => onPick(id)}><Repeat size={15} /></button>}
-                          {part && !locked && <button type="button" className="nx-icon-btn nx-remove" aria-label={`移除${label}`} title="移除" onClick={() => dispatch({ type: 'removePart', slot: id })}><Trash2 size={15} /></button>}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {SLOTS.map(({ id, label }) => renderRow(id, label))}
                 {build.custom.map(part => <tr key={part.id}><th scope="row"><span className="nx-slot-caption">自定义</span></th><td><strong>{part.name}</strong><div className="nx-muted small">{part.spec}</div></td><td>—</td><td className="nx-amount">{part.priceCents == null ? '—' : formatYuan(part.priceCents)}</td><td><button type="button" className="nx-icon-btn nx-remove" aria-label={`移除${part.name}`} onClick={() => dispatch({ type: 'removeCustom', id: part.id })}><Trash2 size={15} /></button></td></tr>)}
+                <tr className="nx-group-row">
+                  <th scope="rowgroup" colSpan={5}>外设<small>可选，不占主机预算{t.peripheralCount > 0 ? ` · 小计 ${formatYuan(t.peripheralCents)}` : ''}</small></th>
+                </tr>
+                {PERIPHERALS.map(({ id, label }) => renderRow(id, label))}
               </tbody>
             </table>
           </div>
           <p className="nx-price-note">{PRICE_NOTE}</p>
         </section>
-
         {activeSlot ? picker : (
           <aside className="nx-panel nx-build-inspector">
             <header className="nx-section-head"><h2><BadgeCheck size={22} />兼容性检查</h2></header>
@@ -156,6 +161,7 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
           <span><Wallet size={18} />预算 <strong>{formatYuan(build.budgetCents)}</strong></span>
           <span title={`包含 ${t.estimateCount} 项估算价，${t.unknownPriceCount} 项待填价`}><CircleDollarSign size={18} />预计总价 <strong>{formatYuan(t.totalCents)}</strong></span>
           <span><PieChart size={18} />{over ? '超出预算' : '剩余预算'} <strong className={over ? 'nx-over' : ''}>{formatYuan(Math.abs(t.remainingCents))}</strong></span>
+          {t.peripheralCount > 0 && <span title="外设不占主机预算">外设 <strong>{formatYuan(t.peripheralCents)}</strong> · 合计 <strong>{formatYuan(t.grandTotalCents)}</strong></span>}
         </div>
         {status !== 'ok' && <button type="button" className={`nx-tag ${status}`} title={summary.text} onClick={onClosePicker}><StatusIcon size={17} />{summary.level === 'ok' && bios ? bios.label : '兼容性待核对'}</button>}
         <div className="nx-footer-actions">
