@@ -12,6 +12,38 @@ const QUIET_SHIFT = { GPU: -0.04, COOLER: 0.02, CASE: 0.01, PSU: 0.01 };
 /** 非游戏用途显卡少分一些 */
 const GENERAL_SHIFT = { GPU: -0.12, CPU: 0.06, RAM: 0.03, SSD: 0.03 };
 
+/**
+ * 用途档案：预算分配、CPU / 显卡怎么比、内存与硬盘容量。
+ * - cpu：gaming = 游戏指数优先；multicore = Blender 多核分优先（渲染、编译、数据处理）
+ * - gpu：gaming = 2K 游戏指数；ai = 先比显存、再比算力，优先 NVIDIA（CUDA）；creator = 优先 NVIDIA，按渲染算力比
+ * - ramGB / ssdGB：按预算给容量，null 用默认规则
+ */
+export const PROFILES = {
+  '2k': { label: '2K 游戏', shares: BASE_SHARES, cpu: 'gaming', gpu: 'gaming' },
+  '4k': { label: '4K / 光追游戏', shares: { GPU: 0.48, CPU: 0.15, MOTHERBOARD: 0.09, RAM: 0.06, SSD: 0.06, PSU: 0.07, CASE: 0.05, COOLER: 0.04 },
+    cpu: 'gaming', gpu: 'gaming', ramGB: () => 32 },
+  // 高帧率吃 CPU：显卡少分一点给 CPU
+  '1080p': { label: '1080p 电竞', shares: { GPU: 0.33, CPU: 0.22, MOTHERBOARD: 0.11, RAM: 0.08, SSD: 0.06, PSU: 0.07, CASE: 0.07, COOLER: 0.06 },
+    cpu: 'gaming', gpu: 'gaming' },
+  // 显存决定能跑多大的模型：一半预算给显卡；内存、硬盘要大（数据集、模型文件）
+  ai: { label: 'AI / 机器学习', shares: { GPU: 0.50, CPU: 0.12, MOTHERBOARD: 0.08, RAM: 0.10, SSD: 0.07, PSU: 0.07, CASE: 0.03, COOLER: 0.03 },
+    cpu: 'multicore', gpu: 'ai', ramGB: b => (b >= 1000000 ? 64 : 32), ssdGB: b => (b >= 800000 ? 2000 : 1000) },
+  creator: { label: '视频剪辑 / 设计', shares: { GPU: 0.28, CPU: 0.26, MOTHERBOARD: 0.10, RAM: 0.11, SSD: 0.09, PSU: 0.06, CASE: 0.05, COOLER: 0.05 },
+    cpu: 'multicore', gpu: 'creator', ramGB: b => (b >= 1200000 ? 64 : 32), ssdGB: b => (b >= 700000 ? 2000 : 1000) },
+  office: { label: '办公学习', shares: Object.fromEntries(Object.entries(BASE_SHARES).map(([k, v]) => [k, v + (GENERAL_SHIFT[k] ?? 0)])),
+    cpu: 'gaming', gpu: 'gaming' },
+};
+
+/** 场景里第一个认识的用途；都不认识时按通用（办公）处理，与原来“非游戏显卡少分”的规则一致 */
+export function profileOf(scenarios = []) {
+  const key = scenarios.find(s => s !== 'office' && PROFILES[s]) ?? (scenarios.includes('office') ? 'office' : null);
+  return key ? { key, ...PROFILES[key] } : { key: 'general', ...PROFILES.office };
+}
+
+const isNvidia = key => /^(RTX|GTX)\b/.test(key);
+/** AI 只考虑 RTX 30 系及以后（更老的卡没有新的 Tensor Core、显存小） */
+const AI_READY = key => /^RTX\s*[345]\d{3}/.test(key);
+
 const BOARD_RANK = { 'MINI-ITX': 1, 'MICRO ATX': 2, ATX: 3, EATX: 4 };
 const up = v => String(v ?? '').trim().toUpperCase();
 const yuan = cents => `¥${Math.round(cents / 100).toLocaleString('zh-CN')}`;
@@ -34,8 +66,7 @@ const coolerFitsSocket = (cooler, socket) =>
   Array.isArray(cooler.specs.sockets) && cooler.specs.sockets.map(up).includes(up(socket));
 
 export function shares(scenarios = []) {
-  const s = { ...BASE_SHARES };
-  if (!scenarios.includes('2k') && !scenarios.includes('4k')) for (const [k, d] of Object.entries(GENERAL_SHIFT)) s[k] += d;
+  const s = { ...profileOf(scenarios).shares };
   if (scenarios.includes('quiet')) for (const [k, d] of Object.entries(QUIET_SHIFT)) s[k] += d;
   return s;
 }
@@ -100,7 +131,9 @@ function dropPriceOutliers(category, pool) {
 /** 带核显的 CPU：ZOL 标注了集成显卡，或 AMD G 系列 / Intel 非 F 型号 */
 export function hasIntegratedGraphics(item) {
   const name = up(item.name);
-  if (item.specs?.integratedGraphics) return true;
+  // ZOL 对 F 系列写的是“不支持”，不能只看字段有没有值
+  const igpu = item.specs?.integratedGraphics;
+  if (igpu != null && igpu !== '') return !/不支持|^无|^否|none|n\/a/i.test(String(igpu));
   if (/RYZEN.*\d{4}G(T|E)?\b/.test(name)) return true;
   if (/INTEL|酷睿|CORE/.test(name) && !/\d{3,5}K?F\b|KF\b/.test(name)) return true;
   return false;
@@ -140,6 +173,7 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
   let stockCoolerNote = null;
   const lockedCents = Object.values(locked).reduce((sum, p) => sum + (p.priceCents ?? 0), 0);
   const open = SLOTS.filter(s => !locked[s]);
+  const profile = profileOf(scenarios);
   const weights = shares(scenarios);
   const weightSum = open.reduce((sum, s) => sum + weights[s], 0) || 1;
   const available = budgetCents - lockedCents;
@@ -158,13 +192,17 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
     const currentFits = current.some(i => price(i) <= cap('CPU'));
     const pool = currentFits ? current : all;
     const platform = currentFits ? '优先 AM5 / LGA1700 / LGA1851 平台，' : '当前平台超出分配，放宽到 AM4，';
-    // 预算内有游戏指数的型号就只按游戏指数比，否则按 Blender 多核分
-    const byGaming = bestPerfWithin(pool, cap('CPU'), cpuGaming);
-    const byPerf = byGaming ?? bestPerfWithin(pool, cap('CPU'), cpuBlender);
+    // 游戏用途：预算内有游戏指数的型号就只按游戏指数比，否则按 Blender 多核分；
+    // AI / 剪辑：反过来，多核分优先（渲染、编译、数据预处理吃核心数）
+    const multicore = profile.cpu === 'multicore';
+    const byGaming = multicore ? null : bestPerfWithin(pool, cap('CPU'), cpuGaming);
+    const byBlender = multicore ? bestPerfWithin(pool, cap('CPU'), cpuBlender) : null;
+    const byPerf = byGaming ?? byBlender ?? bestPerfWithin(pool, cap('CPU'), multicore ? cpuGaming : cpuBlender);
     if (byPerf) {
-      set('CPU', byPerf, byGaming
+      const usedGaming = cpuGaming(byPerf) != null && (byGaming || (multicore && !byBlender));
+      set('CPU', byPerf, usedGaming
         ? `分配 ${yuan(cap('CPU'))}，${platform}选预算内游戏指数最高的（${cpuGaming(byPerf)}%，1080p，9850X3D = 100）`
-        : `分配 ${yuan(cap('CPU'))}，${platform}预算内没有游戏指数数据，选 Blender 多核分最高的（${cpuBlender(byPerf)}）`);
+        : `分配 ${yuan(cap('CPU'))}，${platform}${multicore ? `${profile.label}看多核，` : '预算内没有游戏指数数据，'}选 Blender 多核分最高的（${cpuBlender(byPerf)}）`);
     } else {
       const r = bestWithin(pool, cap('CPU'));
       if (r) set('CPU', r.item, `分配 ${yuan(cap('CPU'))}，${platform}没有性能数据，选预算内估算价最高的${r.over ? '（预算不足，取最便宜的）' : ''}`);
@@ -183,9 +221,12 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
 
   // 内存：同代际；预算 ≥ ¥6,000 选 32GB，否则 16GB；双条优先；DDR5 要求 ≥ 6000 MT/s；挑最便宜
   if (!locked.RAM && memoryType) {
-    // 低预算 16GB；¥6,000 以上 32GB
-    const targetGB = budgetCents >= 600000 ? 32 : 16;
-    let pool = pools.RAM.filter(i => up(i.specs.memoryType) === memoryType && i.specs.capacityGB === targetGB);
+    // 低预算 16GB；¥6,000 以上 32GB；AI / 剪辑按用途档案（如 AI ¥10,000 以上 64GB）
+    const wantGB = profile.ramGB?.(budgetCents) ?? (budgetCents >= 600000 ? 32 : 16);
+    const sized = gb => pools.RAM.filter(i => up(i.specs.memoryType) === memoryType && i.specs.capacityGB === gb);
+    // 目标容量在这个平台上没货时退一档（64 → 32 → 16）
+    const targetGB = [wantGB, 32, 16].find(gb => gb <= wantGB && sized(gb).length) ?? wantGB;
+    let pool = sized(targetGB);
     const dual = pool.filter(i => i.specs.modules === 2);
     if (dual.length) pool = dual;
     const fast = pool.filter(i => memoryType !== 'DDR5' || (i.specs.speedMTs ?? 0) >= 6000);
@@ -204,12 +245,25 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
     const all = [...groups.entries()].filter(([, list]) => list.length >= 2).map(([key, list]) => {
       const sorted = list.map(price).sort((a, b) => a - b);
       const gaming = list.find(i => i.performance?.gaming)?.performance.gaming.index ?? null;
-      return { key, list, median: sorted[Math.floor(sorted.length / 2)], current: CURRENT_GPU.test(key), gaming };
+      // Blender 显卡分主要跑 CUDA / OptiX，可当作 AI、渲染的算力参考
+      const compute = list.find(i => i.performance?.blender)?.performance.blender.score ?? null;
+      return { key, list, median: sorted[Math.floor(sorted.length / 2)], current: CURRENT_GPU.test(key), gaming, compute,
+        vram: list[0].specs.capacityGB, nvidia: isNvidia(key) };
     })
       // 有游戏指数的档次按指数排序（同指数按价格），否则按中位价排序
       .sort((a, b) => (a.gaming ?? -1) - (b.gaming ?? -1) || a.median - b.median);
     // 当代芯片里有在分配内的，就只在当代芯片里升降档；否则才考虑上代
     const capGpu = locked.GPU ? 0 : cap('GPU');
+    if (profile.gpu === 'ai' || profile.gpu === 'creator') {
+      // AI：RTX 30 系及以后的 NVIDIA（CUDA 生态，PyTorch 等开箱即用）；剪辑 / 设计：RTX（编码、渲染加速）
+      // 剪辑只要 RTX（GTX 16 系没有新版编码器、RT 核心）且 ≥ 8GB 显存
+      const preferred = all.filter(g => (profile.gpu === 'ai' ? AI_READY(g.key) : /^RTX\b/.test(g.key) && g.vram >= 8) && g.compute != null);
+      // 硬要求：有符合条件的显卡就只在这些里挑（超分配时由整体收紧去压其他配件），目录里一张都没有才放宽
+      const base = preferred.length ? preferred : all;
+      // AI 先比显存（决定能跑多大的模型），再比算力；剪辑按算力；同分按价格
+      return [...base].sort((a, b) => (profile.gpu === 'ai' ? a.vram - b.vram : 0)
+        || (a.compute ?? -1) - (b.compute ?? -1) || a.median - b.median);
+    }
     // 有游戏指数的档次里有在分配内的，就只在这些档次里比（指数与价格不能混排）
     const withGaming = all.filter(g => g.gaming != null);
     const base = withGaming.some(g => g.median <= capGpu) ? withGaming : all;
@@ -220,14 +274,19 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
   const pickGpu = tier => {
     const g = gpuGroups[tier];
     const item = cheapestOf(g.list);
-    set('GPU', item, `档次 ${g.key}（${g.list.length} 款中位价 ${yuan(g.median)}${g.gaming != null ? `，2K 游戏性能 ${g.gaming}%` : ''}${g.current ? '，当代芯片' : ''}），选这一档里最便宜的一款`);
+    const detail = profile.gpu === 'ai'
+      ? `显存 ${g.vram}GB${g.nvidia ? '，NVIDIA（CUDA）' : ''}${g.compute != null ? `，Blender 算力 ${Math.round(g.compute)}` : ''}`
+      : profile.gpu === 'creator'
+        ? `${g.nvidia ? 'NVIDIA，' : ''}${g.compute != null ? `Blender 渲染分 ${Math.round(g.compute)}` : '没有渲染分'}`
+        : `${g.gaming != null ? `2K 游戏性能 ${g.gaming}%` : ''}${g.current ? `${g.gaming != null ? '，' : ''}当代芯片` : ''}`;
+    set('GPU', item, `档次 ${g.key}（${g.list.length} 款中位价 ${yuan(g.median)}${detail ? `，${detail}` : ''}），选这一档里最便宜的一款`);
   };
   if (!locked.GPU && gpuGroups.length) {
     const c = cap('GPU');
     // 预算内性能最高的一档（有游戏指数时就是指数最高、中位价不超分配的那档）
     const byGaming = gpuGroups.some(g => g.gaming != null);
     // 列表已按（游戏指数，中位价）或中位价升序：取分配内最后一个，即性能最高的一档
-    if (!byGaming) gpuGroups.sort((a, b) => a.median - b.median);
+    if (!byGaming && profile.gpu === 'gaming') gpuGroups.sort((a, b) => a.median - b.median);
     gpuTier = gpuGroups.reduce((best, g, idx) => (g.median <= c ? idx : best), -1);
     if (gpuTier < 0) gpuTier = 0;
     pickGpu(gpuTier);
@@ -292,7 +351,7 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
     if (!locked.SSD) {
       const near = gb => pools.SSD.filter(i => Math.abs((i.specs.capacityGB ?? 0) - gb) <= gb * 0.05);
       // ¥3,500 以下 512GB，¥10,000 以上 2TB，其余 1TB；目标容量没货时就近退一档
-      let targetGB = budgetCents >= 1000000 ? 2000 : budgetCents < 350000 ? 512 : 1000;
+      let targetGB = profile.ssdGB?.(budgetCents) ?? (budgetCents >= 1000000 ? 2000 : budgetCents < 350000 ? 512 : 1000);
       let pool = near(targetGB);
       if (!pool.length && targetGB === 2000) { targetGB = 1000; pool = near(1000); }
       if (!pool.length && targetGB === 512) { targetGB = 500; pool = near(500); }
@@ -326,12 +385,38 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
     }
   }
 
+  // 显卡升不上去还剩 10% 以上预算时，把余量给 CPU：同插槽（主板不用换），按用途的性能指标挑预算内最好的一颗；
+  // 换了以后电源、散热会重算，总价超预算就撤回
+  // 办公不升级：够用就好，省下的钱不硬花
+  if (!locked.CPU && picks.CPU && total() < budgetCents * 0.9 && !['office', 'general'].includes(profile.key)) {
+    const current = picks.CPU;
+    const metric = profile.cpu === 'multicore' ? cpuBlender : cpuGaming;
+    const limit = price(current.item) + (budgetCents - total());
+    const better = bestPerfWithin(pools.CPU.filter(i => up(i.specs.socket) === socket && (!igpu || hasIntegratedGraphics(i))), limit, metric);
+    if (better && better.id !== current.item.id && metric(better) > (metric(current.item) ?? -1)) {
+      const before = { ...picks };
+      set('CPU', better, `${current.reason}；预算还有余量，同插槽升级到${profile.cpu === 'multicore' ? `多核分 ${cpuBlender(better)}` : `游戏指数 ${cpuGaming(better)}%`}的这颗`);
+      fillRest();
+      if (total() > budgetCents) Object.assign(picks, before);
+    }
+  }
+
   if (stockCoolerNote) notes.push(stockCoolerNote);
   if (igpu) notes.push('核显方案：不配独立显卡，用 CPU 自带核显，适合办公、网课、轻度网游；之后想玩大型游戏可以再加显卡。');
   for (const slot of open) if (!picks[slot] && !(slot === 'COOLER' && stockCoolerNote)) notes.push(`${slot} 没有找到同时满足兼容性和价格数据的型号，请手动选择。`);
   if (total() > budgetCents) notes.push(`估算总价 ${yuan(total())} 超出预算 ${yuan(total() - budgetCents)}，可提高预算或手动降低某项。`);
   const usedGaming = gpuGroups.some(g => g.gaming != null);
-  notes.push(`价格为参考价估算，不是报价。CPU 按${picks.CPU?.item.performance?.gaming ? '游戏指数' : ' Blender 多核渲染分'}挑选；显卡${usedGaming ? '按 2K 游戏指数' : '按估算价'}判断档次。`);
+  const gpuBasis = profile.gpu === 'ai' ? '先比显存再比算力（优先 NVIDIA RTX 30 系及以后）'
+    : profile.gpu === 'creator' ? '按渲染算力（优先 NVIDIA）' : usedGaming ? '按 2K 游戏指数' : '按估算价';
+  const cpuBasis = profile.cpu === 'multicore' ? 'Blender 多核分' : picks.CPU?.item.performance?.gaming ? '游戏指数' : ' Blender 多核渲染分';
+  notes.push(`价格为参考价估算，不是报价。CPU 按${cpuBasis}挑选；显卡${gpuBasis}判断档次。`);
+  if (profile.gpu === 'ai' && picks.GPU) {
+    // 4-bit 量化大约每 10 亿参数 0.6GB，再留出上下文缓存：粗略对照，具体看模型和框架
+    const vram = picks.GPU.item.specs.capacityGB;
+    const fits = vram >= 24 ? '30B 左右的模型（4-bit 量化）' : vram >= 16 ? '14B–20B 的模型（4-bit 量化）' : vram >= 12 ? '7B–14B 的模型（4-bit 量化）' : '7B 左右的小模型（4-bit 量化）';
+    notes.push(`显存 ${vram}GB：本地推理大约能跑 ${fits}；训练和微调更吃显存，同样的显存能训练的模型要小得多。数字只是粗略参考。`);
+    if (!isNvidia(up(picks.GPU.item.specs.chipset).replace(/^(GEFORCE|RADEON)\s*/, ''))) notes.push('这个预算里放不下合适的 NVIDIA 显卡，用的是 AMD / Intel：多数 AI 框架对它们的支持不如 CUDA 完善，建议提高预算。');
+  }
 
   return {
     budgetCents,

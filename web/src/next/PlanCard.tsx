@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import type { PlanResult } from '../api/client';
 import { API_TO_SLOT } from '../api/mapping';
 import { formatYuan } from '../domain/money';
+import { vramHint } from '../domain/purposes';
 import { buildChecks, compatSummary, gpuTier, planToBuild } from '../domain/plan';
 import { SLOTS, slotDef } from '../domain/slots';
 import { SLOT_ICONS } from '../components/icons';
@@ -29,7 +30,9 @@ export function PlanCard({ plan, budgetCents, scenarios, onChoose }: { plan: Pla
       <header className="nx-plan-head">
         <div>
           <h3><PlanIcon size={21} />{plan.label}</h3>
-          <span className="nx-muted">{gpuTier(gpu?.performance?.gaming?.index, plan.igpu)}</span>
+          <span className="nx-muted" title={scenarios.includes('ai') && !plan.igpu ? vramHint(Number(gpu?.specs.capacityGB)) ?? undefined : undefined}>
+            {scenarios.includes('ai') && !plan.igpu && gpu ? `显存 ${gpu.specs.capacityGB}GB${/RTX|GTX/i.test(String(gpu.specs.chipset)) ? ' · CUDA' : ''}` : gpuTier(gpu?.performance?.gaming?.index, plan.igpu)}
+          </span>
         </div>
         {diff < 0 && <span className="nx-tag warn"><AlertTriangle size={14} />超预算 {formatYuan(-diff)}</span>}
       </header>

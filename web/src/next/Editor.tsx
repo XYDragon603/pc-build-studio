@@ -4,6 +4,7 @@ import { SLOT_ICONS } from '../components/icons';
 import { totals, type BuildAction } from '../domain/build';
 import { estimatePower, type Check } from '../domain/compat';
 import { formatYuan } from '../domain/money';
+import { purposeOfScenarios } from '../domain/purposes';
 import { buildChecks, compatSummary, INTEGRATED_GPU_NAME, STOCK_COOLER_NAME } from '../domain/plan';
 import { ALL_SLOTS, PERIPHERALS, SLOTS } from '../domain/slots';
 import type { Build, SlotId } from '../domain/types';
@@ -44,6 +45,7 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
   const bios = checks.find(c => c.id === 'bios');
   const items = useCatalogItems(ALL_SLOTS.map(s => build.slots[s.id]?.part?.catalogId));
   const power = estimatePower(build);
+  const purpose = purposeOfScenarios(build.scenarios);
   // 打开方案时自动用配件库最新规格补全（规格不是用户填的，直接更新；价格要用户确认，见下）
   useEffect(() => {
     for (const { slot, specs } of staleSpecs(build, items)) dispatch({ type: 'refreshSpecs', slot, specs });
@@ -110,8 +112,7 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
           <input className="nx-name" value={build.name} onChange={e => dispatch({ type: 'rename', name: e.target.value })} aria-label="方案名称" size={Math.min(Math.max(build.name.length, 7), 25)} maxLength={40} />
           <Pencil size={17} aria-hidden />
         </div>
-        {build.scenarios.includes('2k') && <span className="nx-tag"><Gamepad2 size={17} />2K 游戏</span>}
-        {build.scenarios.includes('office') && <span className="nx-tag">办公学习</span>}
+        {purpose && <span className="nx-tag" title={purpose.hint}>{['game', '4k', '1080p'].includes(purpose.id) && <Gamepad2 size={17} />}{purpose.label}</span>}
         {build.scenarios.includes('quiet') && <span className="nx-tag"><VolumeX size={17} />安静优先</span>}
         <span className="nx-editor-state" role="status">{draftStatus || saveText}</span>
       </header>

@@ -20,7 +20,9 @@ import './next.css';
 /** 带核显的 CPU（与服务端规则一致）：标注了集成显卡，或 AMD G 系列 / Intel 非 F 型号 */
 function cpuHasIgpu(item: CatalogItem): boolean {
   const name = item.name.toUpperCase();
-  if (item.specs?.integratedGraphics) return true;
+  // ZOL 对 F 系列写的是“不支持”，不能只看字段有没有值
+  const igpu = item.specs?.integratedGraphics;
+  if (igpu != null && igpu !== '') return !/不支持|^无|^否|none|n\/a/i.test(String(igpu));
   if (/RYZEN.*\d{4}G(T|E)?\b/.test(name)) return true;
   return /INTEL|酷睿|CORE/.test(name) && !/\d{3,5}K?F\b|KF\b/.test(name);
 }

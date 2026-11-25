@@ -56,3 +56,15 @@ test('键鼠：游戏要机械键盘和高 DPI 鼠标，办公要无线；可以
   assert.ok(pick(office, 'MOUSE').specs.dpi < 8000);
   assert.equal(office.totalCents, office.picks.reduce((s, p) => s + p.item.estimatedPriceCents, 0));
 });
+
+test('按用途挑显示器：AI / 剪辑 27 寸 2K，4K 游戏要强显卡，电竞 1080p ≥165Hz', () => {
+  assert.deepEqual([monitorTarget({ work: true, tier: 'balanced' }).height, monitorTarget({ work: true, tier: 'balanced' }).minHz], [1440, 60]);
+  assert.equal(monitorTarget({ work: true, tier: 'save' }).height, 1080);
+  assert.equal(monitorTarget({ uhd: true, tier: 'balanced', gpuIndex: 81 }).height, 2160);
+  // 显卡不够强的 4K 方案退回 2K
+  assert.equal(monitorTarget({ uhd: true, tier: 'balanced', gpuIndex: 45 }).height, 1440);
+  assert.deepEqual([monitorTarget({ esports: true, tier: 'balanced', gpuIndex: 50 }).height, monitorTarget({ esports: true, tier: 'balanced', gpuIndex: 50 }).minHz], [1080, 165]);
+  const ai = recommendPeripherals(items, { scenarios: ['ai'], gpuIndex: 50 });
+  assert.ok(['m27-2k', 'm27-2k-b', 'm27-2k-60'].includes(pick(ai, 'MONITOR').id));
+  assert.ok(pick(ai, 'MOUSE').specs.dpi < 8000);
+});

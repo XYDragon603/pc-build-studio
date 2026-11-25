@@ -2,13 +2,14 @@ import { FileClock, Gamepad2, Loader2, MonitorPlay, Sparkles, VolumeX, Wallet } 
 import { useState } from 'react';
 import { api, type PlanResult } from '../api/client';
 import { formatYuan } from '../domain/money';
+import { PURPOSES, purposeScenario, type Purpose } from '../domain/purposes';
 import type { Build } from '../domain/types';
 import { PlanCard } from './PlanCard';
 
 const MIN = 2000;
 const MAX = 30000;
 
-export type Purpose = 'office' | 'game';
+export type { Purpose };
 
 export interface PlanGeneration {
   budgetCents: number;
@@ -33,7 +34,7 @@ interface Props {
 }
 
 export function scenariosOf(purpose: Purpose, quiet: boolean): string[] {
-  return [purpose === 'office' ? 'office' : '2k', ...(quiet ? ['quiet'] : [])];
+  return [purposeScenario(purpose), ...(quiet ? ['quiet'] : [])];
 }
 
 export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet, generation, onPlans, onChoose, draft, onResume }: Props) {
@@ -91,9 +92,8 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
           <Gamepad2 size={22} aria-hidden />
           <label htmlFor="nx-purpose">
             <span>使用场景</span>
-            <select id="nx-purpose" value={purpose} onChange={e => onPurpose(e.target.value === 'office' ? 'office' : 'game')}>
-              <option value="game">2K 游戏</option>
-              <option value="office">办公学习</option>
+            <select id="nx-purpose" value={purpose} title={PURPOSES.find(p => p.id === purpose)?.hint} onChange={e => onPurpose(e.target.value as Purpose)}>
+              {PURPOSES.map(p => <option key={p.id} value={p.id} title={p.hint}>{p.label}</option>)}
             </select>
           </label>
         </div>
