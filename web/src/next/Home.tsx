@@ -1,4 +1,4 @@
-import { FileClock, Gamepad2, Loader2, MonitorPlay, Sparkles, VolumeX, Wallet } from 'lucide-react';
+import { FileClock, Gamepad2, Loader2, MonitorPlay, ShieldCheck, Sparkles, VolumeX, Wallet } from 'lucide-react';
 import { useState } from 'react';
 import { api, type PlanResult } from '../api/client';
 import { formatYuan } from '../domain/money';
@@ -16,6 +16,8 @@ export interface PlanGeneration {
   scenarios: string[];
   /** 这次是否顺带配了外设（显示器、键盘、鼠标） */
   peripherals?: boolean;
+  /** 严格预算：每档不得超过本档目标预算，放不下就说明无解 */
+  strict?: boolean;
   plans: PlanResult[];
 }
 
@@ -42,6 +44,7 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState(String(budgetYuan));
   const [withPeripherals, setWithPeripherals] = useState(generation?.peripherals ?? false);
+  const [strict, setStrict] = useState(generation?.strict ?? false);
 
   const textBudget = (value: string) => {
     const n = Math.round(Number(value.replace(/[^\d]/g, '')));
@@ -56,8 +59,8 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
 
   const scenarios = scenariosOf(purpose, quiet);
   const current = generation?.budgetCents === textBudget(text) * 100 && generation.scenarios.join(',') === scenarios.join(',')
-    && !!generation.peripherals === withPeripherals ? generation : null;
-  const fullPlans = current?.plans.filter(p => p.picks.length + Number(p.igpu) + Number(p.stockCooler) === 8) ?? [];
+    && !!generation.peripherals === withPeripherals && !!generation.strict === strict ? generation : null;
+  const fullPlans = current?.plans.filter(p => !p.infeasible && p.picks.length + Number(p.igpu) + Number(p.stockCooler) === 8) ?? [];
   const lowest = fullPlans.length ? Math.min(...fullPlans.map(p => p.totalCents)) : null;
 
   const generate = async () => {
@@ -65,8 +68,8 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
     setLoading(true);
     setError(null);
     try {
-      const plans = await api.plans({ budgetCents, scenarios, peripherals: withPeripherals ? ['MONITOR', 'KEYBOARD', 'MOUSE'] : [] });
-      onPlans({ budgetCents, scenarios, peripherals: withPeripherals, plans });
+      const plans = await api.plans({ budgetCents, scenarios, peripherals: withPeripherals ? ['MONITOR', 'KEYBOARD', 'MOUSE'] : [], maxOverPercent: strict ? 0 : null });
+      onPlans({ budgetCents, scenarios, peripherals: withPeripherals, strict, plans });
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成方案失败');
     } finally {
@@ -105,6 +108,10 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
           <MonitorPlay size={18} aria-hidden /> 顺带配外设
           <input type="checkbox" role="switch" checked={withPeripherals} onChange={e => setWithPeripherals(e.target.checked)} />
         </label>
+        <label className="nx-toggle nx-quiet" title="每一档都不超过本档目标预算；放不下时说明原因和最低可行预算，而不是给一个超支的方案">
+          <ShieldCheck size={18} aria-hidden /> 严格预算
+          <input type="checkbox" role="switch" checked={strict} onChange={e => setStrict(e.target.checked)} />
+        </label>
         <div className="nx-ask-actions">
           {draft && <button type="button" className="nx-btn nx-btn-outline" onClick={onResume} title={draft.name}><FileClock size={17} /> 继续草稿</button>}
           <button type="submit" className="nx-btn nx-btn-primary" disabled={loading}>
@@ -128,7 +135,7 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
         ) : (
           <div className="nx-plans-empty">
             {loading ? <Loader2 className="spin" size={36} /> : <Sparkles size={36} />}
-            <strong>{loading ? '正在挑配件…' : generation ? '预算、用途或外设选项已变更，请重新出方案' : '填好预算和用途，点“出方案”'}</strong>
+            <strong>{loading ? '正在挑配件…' : generation ? '预算、用途或选项已变更，请重新出方案' : '填好预算和用途，点“出方案”'}</strong>
           </div>
         )}
       </section>

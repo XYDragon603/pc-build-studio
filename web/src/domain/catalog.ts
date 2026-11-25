@@ -48,6 +48,37 @@ export function catalogSpecs(slot: SlotId, specs: CatalogItem['specs']): PartSpe
     out.maxBoardFormFactor = s(specs.maxBoardFormFactor)?.toUpperCase() ?? boardFromCaseType(specs.formFactor);
   }
   if (slot === 'cooler') { out.heightMm = up(specs.heightMm); out.radiatorSizeMm = up(specs.radiatorSizeMm); }
+  // 兼容性规则（src/compat-rules.mjs）用到的字段，与目录同名
+  const int = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : undefined);
+  if (slot === 'cpu') out.integratedGraphics = s(specs.integratedGraphics);
+  if (slot === 'gpu') {
+    out.chipset = s(specs.chipset)?.toUpperCase();
+    const pins = specs.powerPins as PartSpecs['powerPins'] | undefined;
+    if (pins && typeof pins === 'object') out.powerPins = pins;
+    out.boardPowerWatts = up(specs.boardPowerWatts);
+    if (specs.needsResizableBar === true) out.needsResizableBar = true;
+  }
+  if (slot === 'psu') {
+    out.pcie8Count = int(specs.pcie8Count);
+    out.pcie6Count = int(specs.pcie6Count);
+    out.pin16Count = int(specs.pin16Count);
+    if (int(specs.pin16Count) !== undefined) out.native16Pin = (specs.pin16Count as number) > 0;
+    out.rail12vAmps = n(specs.rail12vAmps);
+    if (Array.isArray(specs.rail12vSplitAmps)) out.rail12vSplitAmps = (specs.rail12vSplitAmps as unknown[]).map(n).filter((x): x is number => x !== undefined).slice(0, 4);
+    out.atxVersion = s(specs.atxVersion);
+  }
+  if (slot === 'board') {
+    out.chipset = s(specs.chipset)?.toUpperCase();
+    out.memorySlots = int(specs.memorySlots);
+    out.maxMemoryGB = int(specs.maxMemoryGB);
+    if (typeof specs.videoOutputs === 'boolean') out.videoOutputs = specs.videoOutputs;
+    out.pcieGen = int(specs.pcieGen);
+    out.m2Slots = int(specs.m2Slots);
+    out.vrmPhases = int(specs.vrmPhases);
+  }
+  if (slot === 'ram') { out.capacityGB = int(specs.capacityGB); out.modules = int(specs.modules); out.speedMTs = int(specs.speedMTs); }
+  if (slot === 'cooler' && Array.isArray(specs.sockets)) out.sockets = (specs.sockets as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 30);
+  if (slot === 'ssd') out.interface = s(specs.interface);
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined)) as PartSpecs;
 }
 

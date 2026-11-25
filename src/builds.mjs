@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { ApiError, invalid } from './api-error.mjs';
+import { evaluateBuild, overallStatus } from './compat-rules.mjs';
 
 export const slotTypes = [
   { id: 'CPU', label: '处理器' }, { id: 'GPU', label: '显卡' },
@@ -88,6 +89,44 @@ function normalizePart(value) {
   for (const field of ['maxPowerWatts', 'ratedWatts', 'recommendedPsuWatts', 'lengthMm', 'heightMm', 'maxGpuLengthMm', 'maxCoolerHeightMm', 'radiatorSizeMm', 'maxRadiatorMm']) {
     if (inputSpecs[field] != null) specs[field] = integer(inputSpecs[field], 'part.specs.' + field, 1, 5000);
   }
+  // 兼容性规则（compat-rules.mjs）用到的字段：类型、范围都校验，不认识的字段丢弃
+  for (const field of ['chipset']) {
+    if (inputSpecs[field] != null) specs[field] = string(inputSpecs[field], 'part.specs.' + field, 64).toUpperCase();
+  }
+  for (const field of ['integratedGraphics', 'atxVersion', 'interface']) {
+    if (inputSpecs[field] != null) specs[field] = string(inputSpecs[field], 'part.specs.' + field, 80, true);
+  }
+  for (const field of ['pcie8Count', 'pcie6Count', 'pin16Count', 'memorySlots', 'm2Slots', 'pcieGen', 'vrmPhases', 'modules']) {
+    if (inputSpecs[field] != null) specs[field] = integer(inputSpecs[field], 'part.specs.' + field, 0, 64);
+  }
+  for (const field of ['maxMemoryGB', 'capacityGB', 'speedMTs', 'boardPowerWatts']) {
+    if (inputSpecs[field] != null) specs[field] = integer(inputSpecs[field], 'part.specs.' + field, 1, 100000);
+  }
+  for (const field of ['videoOutputs', 'needsResizableBar']) {
+    if (inputSpecs[field] != null) {
+      if (typeof inputSpecs[field] !== 'boolean') throw invalid('part.specs.' + field + ' 必须为布尔值');
+      specs[field] = inputSpecs[field];
+    }
+  }
+  if (inputSpecs.rail12vAmps != null) {
+    if (typeof inputSpecs.rail12vAmps !== 'number' || !(inputSpecs.rail12vAmps > 0 && inputSpecs.rail12vAmps < 1000)) throw invalid('part.specs.rail12vAmps 无效');
+    specs.rail12vAmps = inputSpecs.rail12vAmps;
+  }
+  if (inputSpecs.rail12vSplitAmps != null) {
+    if (!Array.isArray(inputSpecs.rail12vSplitAmps) || inputSpecs.rail12vSplitAmps.length > 4 || !inputSpecs.rail12vSplitAmps.every(a => typeof a === 'number' && a > 0 && a < 1000)) throw invalid('part.specs.rail12vSplitAmps 无效');
+    specs.rail12vSplitAmps = inputSpecs.rail12vSplitAmps;
+  }
+  if (inputSpecs.powerPins != null) {
+    const p = object(inputSpecs.powerPins, 'part.specs.powerPins');
+    const pins = {};
+    for (const k of ['pin6', 'pin8', 'pin16']) if (p[k] != null) pins[k] = integer(p[k], 'part.specs.powerPins.' + k, 0, 4);
+    if (p.none != null) { if (typeof p.none !== 'boolean') throw invalid('part.specs.powerPins.none 必须为布尔值'); pins.none = p.none; }
+    specs.powerPins = pins;
+  }
+  if (inputSpecs.sockets != null) {
+    if (!Array.isArray(inputSpecs.sockets) || inputSpecs.sockets.length > 30 || !inputSpecs.sockets.every(x => typeof x === 'string' && x.length <= 20)) throw invalid('part.specs.sockets 无效');
+    specs.sockets = inputSpecs.sockets.map(x => x.trim().toUpperCase());
+  }
   const priceSource = part.priceSource ?? 'manual';
   // estimate：按目录参考价估算，计入合计但界面单独标注
   if (!['manual', 'demo', 'estimate'].includes(priceSource)) throw invalid('part.priceSource 必须为 manual、demo 或 estimate');
@@ -165,6 +204,20 @@ function compareSpecs(first, second) {
   return first === second ? 'pass' : 'conflict';
 }
 
+/** 配置页用占位配件表示“用核显”“用原装散热”（名称与前端 domain/plan.ts 一致） */
+const IGPU_MODEL = '使用 CPU 核显';
+const STOCK_COOLER_MODEL = 'CPU 原装散热器';
+
+function unifiedCompatibility(build) {
+  const lookup = Object.fromEntries(build.slots.map(slot => [slot.id, slot.part]));
+  const igpu = lookup.GPU?.model === IGPU_MODEL;
+  const stockCooler = lookup.COOLER?.model === STOCK_COOLER_MODEL;
+  const parts = Object.fromEntries(slotTypes.map(({ id }) => [id, lookup[id] && !(id === 'GPU' && igpu) && !(id === 'COOLER' && stockCooler)
+    ? { name: lookup[id].model, specs: lookup[id].specs } : null]));
+  const checks = evaluateBuild(parts, { igpu, stockCooler });
+  return { overall: overallStatus(checks), checks };
+}
+
 export function calculateBuild(build) {
   const parts = build.slots.filter(slot => slot.part).map(slot => slot.part);
   const cost = slots => slots.reduce((sum, slot) => sum + (slot.part?.priceCents ?? 0) * (slot.part?.quantity ?? 0), 0);
@@ -203,6 +256,8 @@ export function calculateBuild(build) {
       radiatorClearance: clearance(lookup.COOLER?.specs?.radiatorSizeMm, lookup.CASE?.specs?.maxRadiatorMm),
       boardFit: boardFit(board?.formFactor, lookup.CASE?.specs?.maxBoardFormFactor),
       gpuPowerConnector: gpuPowerConnector(gpu?.gpuPowerConnector, psu?.native16Pin),
+      // 统一规则（与自动推荐、配置页相同）：五种状态的逐项检查与整机结论
+      ...unifiedCompatibility(build),
     },
   };
 }

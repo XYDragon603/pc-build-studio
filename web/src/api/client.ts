@@ -195,6 +195,17 @@ export interface PlanResult extends RecommendResult {
   igpu: boolean;
   /** 盒装 CPU 自带散热器，不另买 */
   stockCooler: boolean;
+  /** 预算明细：输入预算、本档目标、允许上限（严格预算时）、与两者的差额 */
+  budget?: { inputCents: number; targetCents: number; limitCents: number | null; overTargetCents: number; overInputCents: number };
+  /** 整机兼容性（统一规则） */
+  compatibility?: { overall: 'PASS' | 'FAIL' | 'CONDITIONAL' | 'UNKNOWN'; checks: { id: string; label: string; status: string; detail: string; critical: boolean }[] };
+  /** 这一档没有可行方案：原因、最低可行预算、调整建议（picks 为空） */
+  infeasible?: boolean;
+  reasons?: string[];
+  minFeasibleCents?: number | null;
+  suggestions?: string[];
+  /** 和哪一档配置相同（预算再加也选不出更值得的升级） */
+  sameAs?: 'save' | 'balanced' | 'plus';
   /** 请求了外设时：按这套方案的显卡和档位挑的显示器 / 键盘 / 鼠标（不占主机预算） */
   peripherals?: { picks: RecommendResult['picks']; totalCents: number };
 }
@@ -242,7 +253,7 @@ export const api = {
   updateBuild: (id: string, input: ApiBuildInput & { version: number }) => call<ApiBuild>(`/builds/${id}`, { method: 'PUT', body: input }),
   deleteBuild: (id: string, version: number) => call<void>(`/builds/${id}`, { method: 'DELETE', body: { version } }),
   jdPrices: (skuIds: string[]) => call<JdLookup>('/quotes/jd', { method: 'POST', body: { skuIds }, timeoutMs: 15000 }),
-  plans: (body: { budgetCents: number; scenarios: string[]; peripherals?: ('MONITOR' | 'KEYBOARD' | 'MOUSE')[] }) =>
+  plans: (body: { budgetCents: number; scenarios: string[]; peripherals?: ('MONITOR' | 'KEYBOARD' | 'MOUSE')[]; maxOverPercent?: number | null }) =>
     call<{ plans: PlanResult[] }>('/plans', { method: 'POST', body, timeoutMs: 30000 }).then(r => r.plans),
   recommend: (body: { budgetCents: number; scenarios: string[]; locked: Record<string, { priceCents: number; specs: object }> }) =>
     call<RecommendResult>('/recommend', { method: 'POST', body, timeoutMs: 20000 }),

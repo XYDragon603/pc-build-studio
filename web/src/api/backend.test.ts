@@ -116,8 +116,12 @@ describe('板型、冷排与 16pin（目录数据）', () => {
     expect(server.boardFit.status).toBe('conflict');
     expect(server.radiatorClearance.status).toBe('conflict');
     expect(server.gpuPowerConnector.status).toBe('warning');
-    const labels = compatibility(b).map(c => c.label);
-    expect(labels).toEqual(expect.arrayContaining(['主板装不下', '冷排装不下', '16pin 供电待核对', '显卡可装入']));
+    // 统一规则：板型、冷排 FAIL；16pin 显卡 + 电源没有接口数据 → 关键项待核实；前后端结论一致
+    const front = Object.fromEntries(compatibility(b).map(c => [c.id, c.status]));
+    expect(front).toMatchObject({ boardFit: 'FAIL', radiator: 'FAIL', gpuPower: 'UNKNOWN', gpuLength: 'PASS' });
+    const back = Object.fromEntries(server.checks.map((c: { id: string; status: string }) => [c.id, c.status]));
+    for (const id of ['boardFit', 'radiator', 'gpuPower', 'gpuLength']) expect(back[id]).toBe(front[id]);
+    expect(server.overall).toBe('FAIL');
     expect(sameContent(fromApi({ ...toApiInput(b), totals: viaBackend(b).totals }), b)).toBe(true);
   });
 

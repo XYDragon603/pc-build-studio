@@ -42,6 +42,40 @@ export interface PartSpecs {
   gpuPowerConnector?: string;
   /** 电源带原生 16pin 显卡供电线 */
   native16Pin?: boolean;
+  // —— 以下字段与目录（catalog specs）同名，供 src/compat-rules.mjs 直接判断 ——
+  /** 主板芯片组（如 B650）、显卡芯片（如 GEFORCE RTX 5070） */
+  chipset?: string;
+  /** CPU 核显说明（ZOL 对 F 系列写“不支持”） */
+  integratedGraphics?: string;
+  /** 显卡需要的供电接口数量 */
+  powerPins?: { pin6?: number; pin8?: number; pin16?: number; none?: boolean };
+  /** 显卡整卡功耗（厂商标注），W */
+  boardPowerWatts?: number;
+  /** Intel Arc：需要开启 Resizable BAR */
+  needsResizableBar?: boolean;
+  /** 电源显卡供电接口数量 */
+  pcie8Count?: number;
+  pcie6Count?: number;
+  pin16Count?: number;
+  /** 电源 12V 输出电流（单路），A；多路时为各路电流 */
+  rail12vAmps?: number;
+  rail12vSplitAmps?: number[];
+  atxVersion?: string;
+  /** 主板 */
+  memorySlots?: number;
+  maxMemoryGB?: number;
+  videoOutputs?: boolean;
+  pcieGen?: number;
+  m2Slots?: number;
+  vrmPhases?: number;
+  /** 内存 */
+  capacityGB?: number;
+  modules?: number;
+  speedMTs?: number;
+  /** 散热器支持的插槽 */
+  sockets?: string[];
+  /** 固态接口（如 M.2 PCIe 4.0） */
+  interface?: string;
 }
 
 export type CandidateSource = 'demo' | 'replay' | 'live' | 'catalog';

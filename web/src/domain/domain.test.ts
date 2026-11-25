@@ -65,22 +65,26 @@ describe('估算价', () => {
 });
 
 describe('兼容性', () => {
-  it('缺显卡时功耗保留未知，BIOS 待确认', () => {
-    const labels = compatibility(demoBuild()).map(c => c.label);
-    expect(labels).toEqual(['接口一致', 'BIOS 待确认', '散热器可装入', '主板可装入', '功耗待补齐显卡后估算']);
+  it('缺显卡时功耗保留未知；BIOS 数据不足为待核实，不算通过', () => {
+    const checks = compatibility(demoBuild());
+    expect(checks.find(c => c.id === 'socket')).toMatchObject({ status: 'PASS', level: 'ok' });
+    // 演示数据没有主板芯片组，BIOS 支持关系无法判断
+    expect(checks.find(c => c.id === 'bios')).toMatchObject({ status: 'UNKNOWN', level: 'warn' });
+    expect(checks.find(c => c.id === 'power')?.label).toBe('功耗待补齐显卡后估算');
+    expect(checks.some(c => c.status === 'FAIL')).toBe(false);
   });
   it('显卡超过机箱限长时报错，装得下时给出余量', () => {
     const ok = buildReducer(demoBuild(), { type: 'addCandidate', candidate: candidateById('gpu-galax')!, priceCents: 399900, priceSource: 'demo' });
-    expect(compatibility(ok).find(c => c.id === 'gpuFit')).toMatchObject({ level: 'ok', label: '显卡可装入' });
-    expect(compatibility(ok).find(c => c.id === 'coolerFit')).toMatchObject({ level: 'ok' });
+    expect(compatibility(ok).find(c => c.id === 'gpuLength')).toMatchObject({ level: 'ok', status: 'PASS' });
+    expect(compatibility(ok).find(c => c.id === 'coolerHeight')).toMatchObject({ level: 'ok' });
     const long = { ...candidateById('gpu-galax')!, id: 'long', url: 'https://example.com/long', specs: { lengthMm: 361 } };
     const bad = buildReducer(ok, { type: 'addCandidate', candidate: long, priceCents: 1, priceSource: 'manual' });
-    expect(compatibility(bad).find(c => c.id === 'gpuFit')).toMatchObject({ level: 'error', label: '显卡装不下' });
+    expect(compatibility(bad).find(c => c.id === 'gpuLength')).toMatchObject({ level: 'error', status: 'FAIL', label: '显卡长度不兼容' });
   });
   it('插槽不一致报错', () => {
     let b = buildReducer(demoBuild(), { type: 'toggleLock', slot: 'cpu' });
     b = buildReducer(b, { type: 'addCandidate', candidate: candidateById('cpu-14600kf')!, priceCents: 129900, priceSource: 'manual' });
-    expect(compatibility(b)[0]).toMatchObject({ level: 'error', label: '接口不一致' });
+    expect(compatibility(b).find(c => c.id === 'socket')).toMatchObject({ level: 'error', status: 'FAIL', label: 'CPU 插槽不兼容' });
   });
 });
 

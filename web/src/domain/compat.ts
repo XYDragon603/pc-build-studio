@@ -1,3 +1,5 @@
+import { evaluateBuild, type CompatCheck, type CompatParts, type CompatSlot, type CompatStatus } from '../../../src/compat-rules.mjs';
+import { INTEGRATED_GPU_NAME, STOCK_COOLER_NAME } from './placeholders';
 import type { Build } from './types';
 
 export type CheckLevel = 'ok' | 'warn' | 'error';
@@ -7,6 +9,10 @@ export interface Check {
   level: CheckLevel;
   label: string;
   detail: string;
+  /** 统一规则的五种状态（PASS / FAIL / CONDITIONAL / UNKNOWN） */
+  status?: CompatStatus;
+  /** 供电等安全相关检查 */
+  critical?: boolean;
 }
 
 /** 与后端 calculateBuild 相同的功耗规则：CPU 与显卡峰值合计 + 75W，建议电源留 25% 余量。 */
@@ -47,103 +53,34 @@ export function gpuPowerConnector(connector?: string, native16Pin?: boolean) {
   return { status: native16Pin ? 'pass' : 'warning', required: connector } as const;
 }
 
-const norm = (v?: string) => v?.trim().toUpperCase() || undefined;
+/** 整机兼容性：直接用前后端共用的规则（src/compat-rules.mjs），五种状态映射到界面的三种颜色 */
+const SLOT_MAP: Record<string, CompatSlot> = { cpu: 'CPU', gpu: 'GPU', board: 'MOTHERBOARD', ram: 'RAM', ssd: 'SSD', psu: 'PSU', case: 'CASE', cooler: 'COOLER' };
 
-/**
- * 只做规则可判断的检查，结论保守：缺少信息时显示“待补齐/待确认”，
- * 不宣称整机兼容。判定与后端 compatibility 字段一一对应。
- */
+const LEVEL: Record<CompatStatus, CheckLevel> = { PASS: 'ok', FAIL: 'error', CONDITIONAL: 'warn', UNKNOWN: 'warn', NOT_APPLICABLE: 'ok' };
+
+function labelOf(c: CompatCheck): string {
+  if (c.status === 'FAIL') return `${c.label}不兼容`;
+  if (c.status === 'UNKNOWN') return `${c.label}待核实`;
+  if (c.status === 'CONDITIONAL') return `${c.label}（需满足条件）`;
+  return c.label;
+}
+
 export function compatibility(b: Build): Check[] {
-  const cpu = b.slots.cpu.part?.specs;
-  const board = b.slots.board.part?.specs;
-  const ram = b.slots.ram.part?.specs;
-  const checks: Check[] = [];
-
-  const cpuSocket = norm(cpu?.socket);
-  const boardSocket = norm(board?.socket);
-  if (!cpuSocket || !boardSocket) {
-    checks.push({ id: 'socket', level: 'warn', label: '接口待补齐', detail: 'CPU 与主板都有插槽信息后才能检查是否一致。' });
-  } else if (cpuSocket === boardSocket) {
-    checks.push({ id: 'socket', level: 'ok', label: '接口一致', detail: `CPU 与主板均为 ${cpuSocket} 插槽。` });
-  } else {
-    checks.push({ id: 'socket', level: 'error', label: '接口不一致', detail: `CPU 为 ${cpuSocket}，主板为 ${boardSocket}，无法安装。` });
+  const igpu = b.slots.gpu.part?.name === INTEGRATED_GPU_NAME;
+  const stockCooler = b.slots.cooler.part?.name === STOCK_COOLER_NAME;
+  const parts: CompatParts = {};
+  for (const [slot, key] of Object.entries(SLOT_MAP)) {
+    const part = b.slots[slot as keyof typeof SLOT_MAP & keyof Build['slots']]?.part;
+    if (!part || (slot === 'gpu' && igpu) || (slot === 'cooler' && stockCooler)) continue;
+    parts[key] = { name: part.name, specs: part.specs as Record<string, unknown> };
   }
-
-  const boardMem = norm(board?.memoryType);
-  const ramMem = norm(ram?.memoryType);
-  if (boardMem && ramMem && boardMem !== ramMem) {
-    checks.push({ id: 'mem', level: 'error', label: '内存代际不符', detail: `主板支持 ${boardMem}，所选内存为 ${ramMem}。` });
-  }
-
-  checks.push({ id: 'bios', level: 'warn', label: 'BIOS 待确认', detail: '尚未核对主板出厂 BIOS 是否支持所选 CPU，请向商家确认。' });
-
-  // 尺寸检查只在两件配件都已选择时出现，避免提示栏堆满“待补齐”
-  const caseSpecs = b.slots.case.part?.specs;
-  const cooler = b.slots.cooler.part;
-  const liquid = !!cooler?.specs.radiatorSizeMm;
-  const sizeChecks: [string, string, { specs: { lengthMm?: number; heightMm?: number; radiatorSizeMm?: number } } | null | undefined, 'lengthMm' | 'heightMm' | 'radiatorSizeMm', number | undefined][] = [
-    ['gpuFit', '显卡', b.slots.gpu.part, 'lengthMm', caseSpecs?.maxGpuLengthMm],
-    // 水冷检查冷排位，风冷检查限高
-    liquid
-      ? ['radiatorFit', '冷排', cooler, 'radiatorSizeMm', caseSpecs?.maxRadiatorMm]
-      : ['coolerFit', '散热器', cooler, 'heightMm', caseSpecs?.maxCoolerHeightMm],
-  ];
-  for (const [id, noun, part, field, limit] of sizeChecks) {
-    if (!part || !b.slots.case.part) continue;
-    const c = clearance(part.specs[field], limit);
-    const what = field === 'lengthMm' ? '长度' : field === 'heightMm' ? '高度' : '尺寸';
-    const limitName = field === 'lengthMm' ? '显卡限长' : field === 'heightMm' ? '散热器限高' : '最大冷排';
-    if (c.status === 'unknown') {
-      checks.push({ id, level: 'warn', label: `${noun}${what}待核对`, detail: `${noun}${what}或机箱${limitName}缺少数据，请对照商品参数确认能否装下。` });
-    } else if (c.status === 'pass') {
-      checks.push({ id, level: 'ok', label: `${noun}可装入`, detail: `${noun}${what} ${c.sizeMm}mm，机箱${limitName} ${c.limitMm}mm，余量 ${c.limitMm - c.sizeMm}mm。` });
-    } else {
-      checks.push({ id, level: 'error', label: `${noun}装不下`, detail: `${noun}${what} ${c.sizeMm}mm 超过机箱${limitName} ${c.limitMm}mm。` });
-    }
-  }
-
-  const boardPart = b.slots.board.part;
-  if (boardPart && b.slots.case.part) {
-    const f = boardFit(boardPart.specs.formFactor, caseSpecs?.maxBoardFormFactor);
-    if (f.status === 'pass') checks.push({ id: 'boardFit', level: 'ok', label: '主板可装入', detail: `主板 ${f.formFactor}，机箱最大支持 ${f.maxFormFactor}。` });
-    else if (f.status === 'conflict') checks.push({ id: 'boardFit', level: 'error', label: '主板装不下', detail: `主板 ${f.formFactor} 大于机箱支持的 ${f.maxFormFactor}。` });
-    else checks.push({ id: 'boardFit', level: 'warn', label: '主板板型待核对', detail: '主板板型或机箱支持的板型缺少数据。' });
-  }
-
-  const gpuPart = b.slots.gpu.part;
-  if (gpuPart && b.slots.psu.part) {
-    const g = gpuPowerConnector(gpuPart.specs.gpuPowerConnector, b.slots.psu.part.specs.native16Pin);
-    if (g.status === 'pass') checks.push({ id: 'gpu16pin', level: 'ok', label: '电源原生 16pin', detail: '显卡使用 16pin 供电，所选电源带原生 16pin 线。' });
-    else if (g.status === 'warning') checks.push({ id: 'gpu16pin', level: 'warn', label: '16pin 供电待核对', detail: '显卡使用 16pin 供电，所选电源未标注原生 16pin，需要转接线或向商家确认。' });
-  }
-
-  const p = estimatePower(b);
+  const checks: Check[] = evaluateBuild(parts, { igpu, stockCooler })
+    .filter(c => c.status !== 'NOT_APPLICABLE')
+    // 还没选显卡时，“电源功率”没法估算，换成更明确的提示
+    .filter(c => !(c.id === 'psuWatts' && !b.slots.gpu.part && !igpu))
+    .map(c => ({ id: c.id, level: LEVEL[c.status], status: c.status, critical: c.critical, label: labelOf(c), detail: c.detail }));
   if (!b.slots.gpu.part) {
-    checks.push({ id: 'power', level: 'warn', label: '功耗待补齐显卡后估算', detail: '显卡是整机功耗的主要部分，选定后再估算电源余量。' });
-  } else if (p.recommendedWatts === null) {
-    checks.push({ id: 'power', level: 'warn', label: '功耗数据不足', detail: 'CPU 或显卡缺少峰值功耗数据，显卡也没有建议电源，暂不估算电源余量。' });
-  } else if (p.estimatedLoadWatts === null) {
-    // 只有显卡厂商的建议电源
-    if (p.ratedWatts === null) {
-      checks.push({ id: 'power', level: 'warn', label: `建议电源 ≥ ${p.recommendedWatts}W`, detail: `显卡厂商建议 ${p.recommendedWatts}W；所选电源缺少额定功率。` });
-    } else {
-      const ok = p.status === 'pass';
-      checks.push({
-        id: 'power', level: ok ? 'ok' : 'warn',
-        label: ok ? '电源满足显卡建议' : `电源低于显卡建议 ${p.recommendedWatts}W`,
-        detail: `显卡厂商建议电源 ${p.recommendedWatts}W，当前电源 ${p.ratedWatts}W。缺少 CPU 或显卡功耗数据，未做整机估算。`,
-      });
-    }
-  } else if (p.ratedWatts === null) {
-    checks.push({ id: 'power', level: 'warn', label: `建议电源 ≥ ${p.recommendedWatts}W`, detail: `估算负载约 ${p.estimatedLoadWatts}W；所选电源缺少额定功率。` });
-  } else {
-    const ok = p.status === 'pass';
-    checks.push({
-      id: 'power',
-      level: ok ? 'ok' : 'warn',
-      label: ok ? `约 ${p.estimatedLoadWatts}W · 电源余量充足` : `约 ${p.estimatedLoadWatts}W · 电源偏小`,
-      detail: `估算：CPU 与显卡峰值合计 + 75W，建议电源 ≥ ${p.recommendedWatts}W；当前电源 ${p.ratedWatts}W。不代表实测功耗。`,
-    });
+    checks.push({ id: 'power', level: 'warn', status: 'UNKNOWN', critical: false, label: '功耗待补齐显卡后估算', detail: '显卡是整机功耗的主要部分，选定后再估算电源余量。' });
   }
   return checks;
 }

@@ -7,10 +7,9 @@ import { purposeOfScenarios } from './purposes';
 import { emptySlots } from './slots';
 import type { Build, Part, PartSpecs, SlotId } from './types';
 
-/** 核显方案里“显卡”一栏的占位配件 */
-export const INTEGRATED_GPU_NAME = '使用 CPU 核显';
-/** 盒装 CPU 自带散热器时“散热”一栏的占位配件 */
-export const STOCK_COOLER_NAME = 'CPU 原装散热器';
+import { INTEGRATED_GPU_NAME, STOCK_COOLER_NAME } from './placeholders';
+
+export { INTEGRATED_GPU_NAME, STOCK_COOLER_NAME };
 
 const placeholder = (name: string, spec: string): Part => ({
   name, spec, priceCents: 0, quantity: 1, priceSource: 'manual', catalogId: null, note: spec, url: null, specs: {},
@@ -69,19 +68,28 @@ export function gpuTier(index: number | null | undefined, igpu = false): string 
 }
 
 /** 兼容性一句话：错误优先，其次需要核对的项（BIOS 只在细节里出现，不算进概括） */
+/**
+ * 兼容性一句话：不兼容 > 关键项待核实 > 需满足条件。
+ * 条件项（更新 BIOS、开 XMP、用转接线）是“满足条件即可用”，不当成问题，但要说出来。
+ */
 export function compatSummary(checks: Check[]): { level: 'ok' | 'warn' | 'error'; text: string } {
   const errors = checks.filter(c => c.level === 'error');
-  const warns = checks.filter(c => c.level === 'warn' && c.id !== 'bios');
-  if (errors.length) return { level: 'error', text: `${errors.length} 处不兼容：${errors.map(e => e.label).join('、')}` };
-  if (warns.length) return { level: 'warn', text: `${warns.length} 处需要核对：${warns.map(w => w.label).join('、')}` };
+  const unknownCritical = checks.filter(c => c.status === 'UNKNOWN' && c.critical);
+  const unknown = checks.filter(c => c.status === 'UNKNOWN' && !c.critical && c.id !== 'power');
+  const conditional = checks.filter(c => c.status === 'CONDITIONAL');
+  if (errors.length) return { level: 'error', text: `${errors.length} 项不兼容：${errors.map(e => e.label).join('、')}` };
+  if (unknownCritical.length) return { level: 'warn', text: `${unknownCritical.length} 项关键数据待核实：${unknownCritical.map(w => w.label).join('、')}` };
+  const pending = checks.filter(c => c.id === 'power' && c.level === 'warn');
+  if (pending.length) return { level: 'warn', text: pending[0].label };
+  if (conditional.length || unknown.length) {
+    return { level: 'warn', text: [conditional.length && `${conditional.length} 项需满足条件`, unknown.length && `${unknown.length} 项数据待核实`].filter(Boolean).join('，') + '（其余已确认兼容）' };
+  }
   return { level: 'ok', text: '已检查的项目都兼容' };
 }
 
-/** 核显 / 原装散热这类占位配件不参与尺寸、供电检查 */
+/** 核显 / 原装散热这类占位配件由统一规则按“不适用”处理 */
 export function buildChecks(b: Build): Check[] {
-  const igpu = isIntegratedGpu(b.slots.gpu.part);
-  return compatibility(b).filter(c => !(igpu && ['gpuFit', 'gpu16pin', 'power'].includes(c.id))
-    && !(b.slots.cooler.part?.name === STOCK_COOLER_NAME && c.id === 'coolerFit'));
+  return compatibility(b);
 }
 
 const BOARD_RANK: Record<string, number> = { 'MINI-ITX': 1, 'MICRO ATX': 2, ATX: 3, EATX: 4 };

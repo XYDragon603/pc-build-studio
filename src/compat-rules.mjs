@@ -10,6 +10,8 @@
 //
 // 规则只用目录里写明的数据；认不出的组合返回 UNKNOWN，不按价格或型号名猜。
 
+import { parseGpuPower } from './specs-enrich.mjs';
+
 export const PASS = 'PASS';
 export const FAIL = 'FAIL';
 export const CONDITIONAL = 'CONDITIONAL';
@@ -111,7 +113,8 @@ const adapterPins = watts => (watts > 450 ? 4 : watts > 300 ? 3 : 2);
 
 /** 显卡供电接口 × 电源接口 */
 export function gpuPowerCheck(gpu, psu) {
-  const need = gpu?.powerPins;
+  // 旧方案只存了接口文字（gpuPowerConnector: "16PIN" / 目录 powerConnectors），也能解析
+  const need = gpu?.powerPins ?? parseGpuPower(gpu?.gpuPowerConnector ?? gpu?.powerConnectors);
   if (!need) return { status: UNKNOWN, detail: '显卡缺少供电接口数据，请核对显卡需要几个 8pin / 16pin，以及电源是否够用。' };
   if (need.none) return { status: NOT_APPLICABLE, detail: '显卡不需要外接供电。' };
   const has8 = psu?.pcie8Count;

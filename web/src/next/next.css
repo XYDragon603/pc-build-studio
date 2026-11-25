@@ -319,3 +319,9 @@
 .nx-plan-peripherals > span small { margin-left: auto; font-size: 11px; }
 .nx-plan-peripherals ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
 .nx-plan-peripherals li { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 6px; }
+
+/* 方案卡片：预算明细、无解说明 */
+.nx-plan-budget { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-2); }
+.nx-plan-infeasible { border-style: dashed; }
+.nx-plan-reasons, .nx-plan-suggest ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.55; color: var(--ink); display: grid; gap: 4px; }
+.nx-plan-suggest { font-size: 13px; color: var(--ink-2); display: grid; gap: 4px; }
