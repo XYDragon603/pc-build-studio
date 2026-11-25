@@ -5,6 +5,7 @@
 // 规格与价格均来自目录（估算价不是报价）。
 
 import { biosSupport, CONDITIONAL, evaluateBuild, FAIL, overallStatus, PASS, powerEstimate, UNKNOWN } from './compat-rules.mjs';
+import { optimizePlans } from './optimizer.mjs';
 
 export const SLOTS = ['CPU', 'GPU', 'MOTHERBOARD', 'RAM', 'SSD', 'PSU', 'CASE', 'COOLER'];
 
@@ -487,65 +488,11 @@ const TIER_LABELS = { save: '省钱版', balanced: '推荐版', plus: '进阶版
  * ¥3,500 以下或“办公”用途时，省钱版为核显方案；办公用途三套都不配独显。
  */
 export function recommendPlans(items, { budgetCents, scenarios = [], maxOverPercent = null, tierRatios = TIER_RATIOS, locked = {} }) {
-  const office = scenarios.includes('office');
-  const needsGpu = scenarios.includes('ai') || scenarios.includes('creator');
-  const lowBudget = budgetCents < 350000;
-  const variants = Object.entries(tierRatios).map(([id, ratio]) => ({
-    id, label: TIER_LABELS[id] ?? id, budget: Math.round(budgetCents * ratio / 10000) * 10000,
-    igpu: !locked.GPU && (office || (id === 'save' && lowBudget && !needsGpu)),
-  }));
-  const limitOf = target => (maxOverPercent == null ? Infinity : Math.floor(target * (1 + maxOverPercent / 100)));
-  const plans = variants.map(v => {
-    const limit = limitOf(v.budget);
-    let r = recommend(items, { budgetCents: v.budget, scenarios, igpu: v.igpu, locked });
-    // 预算放不下独显（超出 10% 以上，或超出允许范围）时改用核显方案；AI / 剪辑离不开独显，不降级
-    if (!v.igpu && !needsGpu && !locked.GPU && (r.totalCents > v.budget * 1.1 || r.totalCents > limit)) {
-      const ig = recommend(items, { budgetCents: v.budget, scenarios, igpu: true, locked });
-      // 只有核显方案配齐了（不缺件、无确认冲突）才替换；缺件的“方案”总价低不代表可行
-      const complete = SLOTS.every(slot => slot === 'GPU' || locked[slot] || ig.picks.some(p => p.slot === slot) || (slot === 'COOLER' && ig.stockCooler));
-      if (complete && ig.compatibility?.overall !== FAIL && ig.totalCents < r.totalCents) {
-        ig.notes.unshift(`这个预算放不下独立显卡（最低约 ${yuan(r.totalCents)}），改用核显方案。`);
-        r = ig;
-      }
-    }
-    const budget = { inputCents: budgetCents, targetCents: v.budget, limitCents: Number.isFinite(limit) ? limit : null,
-      overTargetCents: r.totalCents - v.budget, overInputCents: r.totalCents - budgetCents };
-    const missing = SLOTS.filter(slot => !r.picks.some(p => p.slot === slot) && !locked[slot]
-      && !(slot === 'GPU' && r.igpu) && !(slot === 'COOLER' && r.stockCooler));
-    const reasons = [];
-    if (missing.length) reasons.push(`缺少满足兼容性和价格条件的配件：${missing.join('、')}。`);
-    if (r.compatibility?.overall === FAIL) {
-      reasons.push(`配置里有确认不兼容的组合：${r.compatibility.checks.filter(c => c.status === FAIL).map(c => `${c.label}（${c.detail}）`).join('；')}`);
-    }
-    if (r.totalCents > limit) {
-      reasons.push(maxOverPercent === 0
-        ? `严格预算：本档目标 ${yuan(v.budget)} 内找不到兼容的完整配置，能找到的最低约 ${yuan(r.totalCents)}。`
-        : `允许超出 ${maxOverPercent}%（最多 ${yuan(limit)}）仍放不下，能找到的最低约 ${yuan(r.totalCents)}。`);
-    }
-    if (reasons.length) {
-      const minFeasibleCents = missing.length || r.compatibility?.overall === FAIL ? null : r.totalCents;
-      return { id: v.id, label: v.label, targetCents: v.budget, budget, infeasible: true, reasons,
-        minFeasibleCents,
-        suggestions: [
-          minFeasibleCents && `把预算提高到约 ${yuan(Math.ceil(minFeasibleCents / (tierRatios[v.id] ?? 1) / 10000) * 10000)}（这一档的目标预算就能覆盖）`,
-          maxOverPercent === 0 && '关闭严格预算，或允许超出一定比例',
-          scenarios.includes('quiet') && '关闭“安静优先”（它要求金牌电源和更好的散热）',
-          Object.keys(locked).length && '解锁部分配件，让推荐重新挑',
-        ].filter(Boolean),
-        // 找到的部分配件留着，方便看清卡在哪里；不算作方案
-        picks: [], partialPicks: r.picks, partialTotalCents: r.totalCents,
-        totalCents: 0, notes: r.notes, igpu: r.igpu, stockCooler: r.stockCooler, compatibility: r.compatibility };
-    }
-    return { id: v.id, label: v.label, targetCents: v.budget, budget, ...r };
-  });
-  // 和上一档配置完全一样时照常返回，但标明“与上一档相同”以及原因（预算再加也选不出更好的），不让这一档消失
-  const sameAs = (a, b) => !a.infeasible && !b.infeasible && a.picks.map(p => p.item.id).join() === b.picks.map(p => p.item.id).join();
-  for (let i = 1; i < plans.length; i++) {
-    const prev = plans.slice(0, i).reverse().find(p => sameAs(plans[i], p));
-    if (prev) {
-      plans[i].sameAs = prev.id;
-      plans[i].notes = [`和${prev.label}配置相同：在${yuan(plans[i].targetCents)}的目标预算下，没有找到比${prev.label}更值得多花钱的升级，所以不强行堆料。`, ...plans[i].notes];
-    }
-  }
-  return plans;
+  // V2：整机组合优化（src/optimizer.mjs）。原来的逐件分配算法保留在 recommend() 里，供 /recommend 接口使用
+  return optimizePlans(items, { budgetCents, scenarios, maxOverPercent, tierRatios, locked }).plans;
+}
+
+/** 同上，另附搜索统计与耗时（候选数、组合数、被兼容性规则排除的组合数） */
+export function recommendPlansWithMeta(items, options) {
+  return optimizePlans(items, { tierRatios: TIER_RATIOS, maxOverPercent: null, locked: {}, ...options });
 }

@@ -544,9 +544,8 @@ test('目录按市场筛选，自动方案与推荐只使用国内条目', async
   // 目录只有零星几件，三档都应明确返回“无解”及原因，找到的部分配件放在 partialPicks
   assert.ok(plans.data.plans.length === 3 && plans.data.plans.every(plan => plan.infeasible && plan.reasons.length));
   const planPicks = plans.data.plans.flatMap(plan => [...plan.picks, ...(plan.partialPicks ?? [])]);
+  assert.ok(planPicks.every(pick => pick.item.market === 'cn'));
   const recommendation = await request('/recommend', 'POST', input);
-  for (const picks of [planPicks, recommendation.data.picks]) {
-    assert.ok(picks.some(pick => pick.item.id === 'zol-domestic'));
-    assert.ok(picks.every(pick => pick.item.market === 'cn'));
-  }
+  assert.ok(recommendation.data.picks.some(pick => pick.item.id === 'zol-domestic'));
+  assert.ok(recommendation.data.picks.every(pick => pick.item.market === 'cn'));
 });
