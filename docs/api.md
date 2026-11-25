@@ -150,3 +150,35 @@ npm run catalog:import
 `/recommend` 和 `/plans` 的自动选件都只使用 `market: "cn"` 的条目。
 
 目录条目在有价格历史时带 `priceTrend: { previousCents, changedAt, lowestCents, since, points }`。
+
+## 整机方案（V2）
+
+`POST /plans` 请求体：
+
+```json
+{ "budgetCents": 800000, "scenarios": ["2k"], "peripherals": [], "maxOverPercent": null,
+  "priceMode": "estimate", "allowUsed": false,
+  "locked": { "CPU": { "priceCents": 145000, "specs": { "socket": "AM5" }, "name": "…" }, "GPU": { "igpu": true } } }
+```
+
+- `maxOverPercent`：`null` 不限；`0` 严格预算（每档不超过本档目标）；`1`–`50` 允许超出的百分比。
+- `priceMode`：`estimate` 参考估算（默认）；`manual` 优先我的价格（见下文价格记录）。`allowUsed` 只在 `manual` 下生效。
+- `locked`：硬约束，键为标准槽位；`GPU: { igpu: true }` 表示锁定使用核显。
+
+返回 `{ plans, priceMeta }`，`plans` 固定三档（`save` / `balanced` / `plus`，目标为预算的 80% / 100% / 120%）。每档含 `picks`、`totalCents`、`budget`（输入、目标、上限与差额）、`compatibility`（`overall` 与 `checks[]`，状态为 `PASS` / `FAIL` / `CONDITIONAL` / `UNKNOWN` / `NOT_APPLICABLE`）、`score`（`total` 0–100、`parts` 分项 0–100、`bottleneck`、`version`）、`sameAs`（与哪一档相同）和 `notes`。找不到可行组合时 `infeasible: true`，附 `reasons`、`minFeasibleCents`、`suggestions`，不会悄悄少一档。
+
+## 价格记录（V2）
+
+用户价格与配件规格分开存放在 `<数据目录>/prices.json`。不抓取电商实时价。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/prices?componentId=` | 列出记录 |
+| POST | `/prices` | 新增一条：`{ componentId, priceCents, shippingCents?, sourceName?, sourceUrl?, observedAt?, condition?, stockStatus?, priceType?, confidence?, sku?, note? }` |
+| DELETE | `/prices/{id}` | 删除 |
+| GET | `/prices/export?format=csv` | 导出 CSV（UTF-8 BOM，防公式注入）；不带 `format` 时导出 JSON `{ version, exportedAt, records }` |
+| POST | `/prices/import` | `{ format: "csv" \| "json", content }`，逐行校验，返回 `{ imported, errors: [{ row, message }] }`；错误行不写入 |
+
+字段取值：`condition` 为 `new` / `used` / `refurbished` / `old-stock` / `oem`；`stockStatus` 为 `in_stock` / `out_of_stock` / `unknown`；`priceType` 为 `manual` / `verified` / `reference` / `estimate`（`verified` 必须带 HTTPS `sourceUrl`）；货币只支持 `CNY`。
+
+`priceMode: "manual"` 时，每个配件取最新一条有效记录（价格 + 运费）；默认忽略二手、翻新、拆机和明确无货的记录。目录参考价超过 14 天、用户记录超过 30 天标记 `priceStale: true`。`GET /catalog?priceMode=manual&allowUsed=true` 按同样规则显示价格，条目带 `priceSource: "catalog" | "user"`。
