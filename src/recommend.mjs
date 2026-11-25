@@ -4,6 +4,8 @@
 // 只使用有估算价、且兼容性所需规格齐全的目录条目；已锁定的配件保留不动。
 // 规格与价格均来自目录（估算价不是报价）。
 
+import { biosSupport, CONDITIONAL, evaluateBuild, FAIL, overallStatus, PASS, powerEstimate, UNKNOWN } from './compat-rules.mjs';
+
 export const SLOTS = ['CPU', 'GPU', 'MOTHERBOARD', 'RAM', 'SSD', 'PSU', 'CASE', 'COOLER'];
 
 /** 2K 游戏的基础分配；“安静优先”从显卡挪一点给散热、机箱、电源 */
@@ -61,9 +63,9 @@ function caseMaxBoard(specs) {
   return null;
 }
 
-/** 散热器插槽列表可能写作 LGA115X、AM4/AM5 等；只要列出 CPU 插槽即视为支持 */
+/** 散热器支持插槽：与兼容性规则一致，AM5 可用 AM4 扣具、LGA1851 可用 LGA1700 扣具 */
 const coolerFitsSocket = (cooler, socket) =>
-  Array.isArray(cooler.specs.sockets) && cooler.specs.sockets.map(up).includes(up(socket));
+  evaluateBuild({ CPU: { specs: { socket } }, COOLER: { specs: cooler.specs } }).find(c => c.id === 'coolerSocket')?.status === PASS;
 
 export function shares(scenarios = []) {
   const s = { ...profileOf(scenarios).shares };
@@ -215,9 +217,15 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
 
   // 主板：插槽一致；优先 Micro ATX，预算内估算价最高
   if (!locked.MOTHERBOARD && socket) {
-    const pool = pools.MOTHERBOARD.filter(i => up(i.specs.socket) === socket && i.specs.memoryType && BOARD_RANK[up(i.specs.formFactor)]);
-    const matx = pool.filter(i => up(i.specs.formFactor) === 'MICRO ATX');
-    const r = bestWithin(matx.length ? matx : pool, cap('MOTHERBOARD'));
+    // 排除确认不兼容的：BIOS 官方不支持这颗 CPU；核显方案下主板没有视频输出
+    const cpuName = picks.CPU?.item.name ?? locked.CPU?.name ?? '';
+    const pool = pools.MOTHERBOARD.filter(i => up(i.specs.socket) === socket && i.specs.memoryType && BOARD_RANK[up(i.specs.formFactor)]
+      && biosSupport(cpuName, i.specs.chipset).status !== FAIL && !(igpu && i.specs.videoOutputs === false));
+    // 原生支持这颗 CPU（BIOS 不用更新）的主板在分配内有货就只在这些里挑
+    const native = pool.filter(i => biosSupport(cpuName, i.specs.chipset).status === PASS);
+    const base = native.some(i => price(i) <= cap('MOTHERBOARD')) ? native : pool;
+    const matx = base.filter(i => up(i.specs.formFactor) === 'MICRO ATX');
+    const r = bestWithin(matx.length ? matx : base, cap('MOTHERBOARD'));
     if (r) set('MOTHERBOARD', r.item, `插槽 ${socket}，优先 Micro ATX，分配 ${yuan(cap('MOTHERBOARD'))} 内估算价最高`);
   }
   const memoryType = up(specsOf('MOTHERBOARD')?.memoryType);
@@ -227,8 +235,9 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
     // 低预算 16GB；¥6,000 以上 32GB；AI / 剪辑按用途档案（如 AI ¥10,000 以上 64GB）
     const wantGB = profile.ramGB?.(budgetCents) ?? (budgetCents >= 600000 ? 32 : 16);
     const sized = gb => pools.RAM.filter(i => up(i.specs.memoryType) === memoryType && i.specs.capacityGB === gb);
-    // 目标容量在这个平台上没货时退一档（64 → 32 → 16）
-    const targetGB = [wantGB, 32, 16].find(gb => gb <= wantGB && sized(gb).length) ?? wantGB;
+    // 目标容量在这个平台上没货时先往下退（64 → 32 → 16），再往上找最近的（16 没货就用 32）
+    const targetGB = [wantGB, 32, 16].find(gb => gb <= wantGB && sized(gb).length)
+      ?? [32, 64].find(gb => gb > wantGB && sized(gb).length) ?? wantGB;
     let pool = sized(targetGB);
     const dual = pool.filter(i => i.specs.modules === 2);
     if (dual.length) pool = dual;
@@ -277,7 +286,10 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
   const pickGpu = tier => {
     const g = gpuGroups[tier];
     // 挑这一档里最便宜的，但不低于中位价的 75%：明显偏低的多半是旧价或错价（如中位 ¥16,999 的卡标 ¥10,999）
-    const item = cheapestOf(g.list.filter(i => price(i) >= g.median * 0.75)) ?? cheapestOf(g.list);
+    const sane = g.list.filter(i => price(i) >= g.median * 0.75);
+    // 优先数据完整的型号（供电接口、长度都有），兼容性和供电才能确认；没有再退回全部
+    const complete = (sane.length ? sane : g.list).filter(i => i.specs.powerPins && i.specs.lengthMm);
+    const item = cheapestOf(complete) ?? cheapestOf(sane) ?? cheapestOf(g.list);
     const detail = profile.gpu === 'ai'
       ? `显存 ${g.vram}GB${g.nvidia ? '，NVIDIA（CUDA）' : ''}${g.compute != null ? `，Blender 算力 ${Math.round(g.compute)}` : ''}`
       : profile.gpu === 'creator'
@@ -300,20 +312,37 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
   const fillRest = () => {
     // 电源：额定功率 ≥ max(显卡建议电源, (CPU 峰值 + 显卡功耗 + 75) × 1.25)；安静优先选金牌；挑最便宜
     if (!locked.PSU) {
-      const gpu = specsOf('GPU') ?? {};
+      const gpu = igpu ? {} : (specsOf('GPU') ?? {});
       const cpu = specsOf('CPU') ?? {};
-      const est = cpu.maxPowerWatts && (gpu.maxPowerWatts ?? gpu.tdpWatts) ? Math.ceil((cpu.maxPowerWatts + (gpu.maxPowerWatts ?? gpu.tdpWatts) + 75) * 1.25) : 0;
+      const p = powerEstimate(cpu, gpu, { igpu });
       // 核显机功耗低，300W 起；独显机 450W 起
       // 显卡完全没有功耗数据时不能当 0W：按游戏指数保守估（旗舰级 1000W、高端 850W、中端 650W）
       const gpuIndex = picks.GPU?.item.performance?.gaming?.index ?? null;
-      const unknownGpuPower = !igpu && picks.GPU && !(gpu.maxPowerWatts ?? gpu.tdpWatts) && !gpu.recommendedPsuWatts;
+      const unknownGpuPower = !igpu && picks.GPU && p.gpuW == null && !gpu.recommendedPsuWatts;
       const guess = !unknownGpuPower ? 0 : gpuIndex >= 100 ? 1000 : gpuIndex >= 65 ? 850 : 650;
-      const need = Math.max(gpu.recommendedPsuWatts ?? 0, est, guess, igpu ? 300 : 450);
-      let pool = pools.PSU.filter(i => (i.specs.ratedWatts ?? 0) >= need);
-      const gold = pool.filter(i => /金|GOLD|白金|PLATINUM|钛金|TITANIUM/i.test(i.specs.efficiency ?? ''));
+      const need = Math.max(p.recommended ?? 0, guess, igpu ? 300 : 450);
+      // 供电接口与 12V 输出在挑选时就检查：确认不兼容（FAIL）的直接排除；
+      // 其余按 PASS → CONDITIONAL（如转接线）→ UNKNOWN 的顺序优先，同一档再比价格
+      const graded = pools.PSU.filter(i => (i.specs.ratedWatts ?? 0) >= need).map(i => {
+        const checks = evaluateBuild({ CPU: { name: picks.CPU?.item.name, specs: cpu }, GPU: igpu ? null : { specs: gpu }, PSU: { specs: i.specs } }, { igpu })
+          .filter(c => ['gpuPower', 'psu12v', 'psuWatts'].includes(c.id));
+        const ranks = checks.map(c => (c.status === FAIL ? 9 : c.status === UNKNOWN ? 2 : c.status === CONDITIONAL ? 1 : 0));
+        // 先比最差的一项，再比各项之和（同样“待核实”时，单路 12V 优于多路）
+        return { item: i, checks, rank: Math.max(0, ...ranks), sum: ranks.reduce((a, b) => a + b, 0) };
+      }).filter(g => g.rank < 9);
+      let pool = graded;
+      const gold = pool.filter(g => /金|GOLD|白金|PLATINUM|钛金|TITANIUM/i.test(g.item.specs.efficiency ?? ''));
       if (scenarios.includes('quiet') && gold.length) pool = gold;
-      const item = cheapestOf(pool);
-      if (item) set('PSU', item, `需要 ≥ ${need}W${scenarios.includes('quiet') && gold.length ? '，安静优先选金牌及以上' : ''}，满足条件里最便宜`);
+      const bestRank = Math.min(...pool.map(g => g.rank));
+      const best = pool.filter(g => g.rank === bestRank).sort((a, b) => a.sum - b.sum || price(a.item) - price(b.item))[0];
+      if (best) {
+        const note = bestRank === 0 ? '供电接口、12V 输出已确认' : bestRank === 1 ? '供电需满足条件（见兼容性说明）' : '供电接口数据不全，待核实';
+        set('PSU', best.item, `需要 ≥ ${need}W${scenarios.includes('quiet') && gold.length ? '，安静优先选金牌及以上' : ''}；${note}；同等条件里最便宜`);
+      } else if (!pools.PSU.some(i => (i.specs.ratedWatts ?? 0) >= need)) {
+        notes.push(`目录里没有额定功率 ≥ ${need}W 的电源。`);
+      } else {
+        notes.push(`额定功率 ≥ ${need}W 的电源都与显卡供电接口或 12V 输出不兼容，请手动选择。`);
+      }
     }
 
     // 原装散热：AMD 盒装、非 X / X3D 的型号自带散热器，¥5,000 以下且不要求安静时不再另买
@@ -357,7 +386,9 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
 
     // 硬盘：预算 ≥ ¥10,000 选 2TB，否则 1TB；优先 PCIe 4.0 以上、读 ≥ 5000MB/s；挑最便宜
     if (!locked.SSD) {
-      const near = gb => pools.SSD.filter(i => Math.abs((i.specs.capacityGB ?? 0) - gb) <= gb * 0.05);
+      // 主板明确没有 M.2 接口时只能用 SATA 固态
+      const noM2 = specsOf('MOTHERBOARD')?.m2Slots === 0;
+      const near = gb => pools.SSD.filter(i => Math.abs((i.specs.capacityGB ?? 0) - gb) <= gb * 0.05 && !(noM2 && /M\.2/i.test(i.specs.interface ?? '')));
       // ¥3,500 以下 512GB，¥10,000 以上 2TB，其余 1TB；目标容量没货时就近退一档
       let targetGB = profile.ssdGB?.(budgetCents) ?? (budgetCents >= 1000000 ? 2000 : budgetCents < 350000 ? 512 : 1000);
       let pool = near(targetGB);
@@ -426,8 +457,14 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
     if (!isNvidia(up(picks.GPU.item.specs.chipset).replace(/^(GEFORCE|RADEON)\s*/, ''))) notes.push('这个预算里放不下合适的 NVIDIA 显卡，用的是 AMD / Intel：多数 AI 框架对它们的支持不如 CUDA 完善，建议提高预算。');
   }
 
+  // 整机兼容性（与配置页同一套规则）
+  const compatChecks = evaluateBuild(Object.fromEntries(SLOTS.map(slot => [slot, picks[slot]
+    ? { name: picks[slot].item.name, specs: picks[slot].item.specs }
+    : locked[slot] && !locked[slot].igpu ? { name: locked[slot].name ?? '', specs: locked[slot].specs ?? {} } : null])),
+  { igpu, stockCooler: !!stockCoolerNote });
   return {
     budgetCents,
+    compatibility: { overall: overallStatus(compatChecks), checks: compatChecks },
     totalCents: total(),
     lockedCents,
     igpu,
@@ -437,31 +474,78 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
   };
 }
 
+/** 三档相对输入预算的比例（可配置；只是各档的目标预算，不是硬规则） */
+export const TIER_RATIOS = { save: 0.8, balanced: 1.0, plus: 1.2 };
+const TIER_LABELS = { save: '省钱版', balanced: '推荐版', plus: '进阶版' };
+
 /**
- * 一次出三套：省钱版 / 推荐版 / 进阶版。
+ * 一次出三套：省钱版 / 推荐版 / 进阶版。每一档都会返回：要么是方案，要么是“没有可行方案”及原因，不会静默消失。
+ *
+ * - maxOverPercent：null = 不限（超出时标记）；0 = 严格预算（不得超过本档目标预算）；5、10… = 允许超出的比例
+ * - tierRatios：各档目标预算相对输入预算的比例，默认 80% / 100% / 120%
+ * - locked：锁定的配件（硬约束，与 recommend 相同）；锁定配件之间确认不兼容时报告无解
  * ¥3,500 以下或“办公”用途时，省钱版为核显方案；办公用途三套都不配独显。
  */
-export function recommendPlans(items, { budgetCents, scenarios = [] }) {
+export function recommendPlans(items, { budgetCents, scenarios = [], maxOverPercent = null, tierRatios = TIER_RATIOS, locked = {} }) {
   const office = scenarios.includes('office');
+  const needsGpu = scenarios.includes('ai') || scenarios.includes('creator');
   const lowBudget = budgetCents < 350000;
-  const variants = [
-    { id: 'save', label: '省钱版', budget: Math.round(budgetCents * 0.8 / 10000) * 10000, igpu: office || lowBudget },
-    { id: 'balanced', label: '推荐版', budget: budgetCents, igpu: office },
-    { id: 'plus', label: '进阶版', budget: Math.round(budgetCents * 1.2 / 10000) * 10000, igpu: office },
-  ];
+  const variants = Object.entries(tierRatios).map(([id, ratio]) => ({
+    id, label: TIER_LABELS[id] ?? id, budget: Math.round(budgetCents * ratio / 10000) * 10000,
+    igpu: !locked.GPU && (office || (id === 'save' && lowBudget && !needsGpu)),
+  }));
+  const limitOf = target => (maxOverPercent == null ? Infinity : Math.floor(target * (1 + maxOverPercent / 100)));
   const plans = variants.map(v => {
-    let r = recommend(items, { budgetCents: v.budget, scenarios, igpu: v.igpu });
-    // 预算放不下独显（超出 10% 以上）时改用核显方案
-    if (!v.igpu && r.totalCents > v.budget * 1.1) {
-      const ig = recommend(items, { budgetCents: v.budget, scenarios, igpu: true });
-      if (ig.totalCents < r.totalCents) {
+    const limit = limitOf(v.budget);
+    let r = recommend(items, { budgetCents: v.budget, scenarios, igpu: v.igpu, locked });
+    // 预算放不下独显（超出 10% 以上，或超出允许范围）时改用核显方案；AI / 剪辑离不开独显，不降级
+    if (!v.igpu && !needsGpu && !locked.GPU && (r.totalCents > v.budget * 1.1 || r.totalCents > limit)) {
+      const ig = recommend(items, { budgetCents: v.budget, scenarios, igpu: true, locked });
+      // 只有核显方案配齐了（不缺件、无确认冲突）才替换；缺件的“方案”总价低不代表可行
+      const complete = SLOTS.every(slot => slot === 'GPU' || locked[slot] || ig.picks.some(p => p.slot === slot) || (slot === 'COOLER' && ig.stockCooler));
+      if (complete && ig.compatibility?.overall !== FAIL && ig.totalCents < r.totalCents) {
         ig.notes.unshift(`这个预算放不下独立显卡（最低约 ${yuan(r.totalCents)}），改用核显方案。`);
         r = ig;
       }
     }
-    return { id: v.id, label: v.label, targetCents: v.budget, ...r };
+    const budget = { inputCents: budgetCents, targetCents: v.budget, limitCents: Number.isFinite(limit) ? limit : null,
+      overTargetCents: r.totalCents - v.budget, overInputCents: r.totalCents - budgetCents };
+    const missing = SLOTS.filter(slot => !r.picks.some(p => p.slot === slot) && !locked[slot]
+      && !(slot === 'GPU' && r.igpu) && !(slot === 'COOLER' && r.stockCooler));
+    const reasons = [];
+    if (missing.length) reasons.push(`缺少满足兼容性和价格条件的配件：${missing.join('、')}。`);
+    if (r.compatibility?.overall === FAIL) {
+      reasons.push(`配置里有确认不兼容的组合：${r.compatibility.checks.filter(c => c.status === FAIL).map(c => `${c.label}（${c.detail}）`).join('；')}`);
+    }
+    if (r.totalCents > limit) {
+      reasons.push(maxOverPercent === 0
+        ? `严格预算：本档目标 ${yuan(v.budget)} 内找不到兼容的完整配置，能找到的最低约 ${yuan(r.totalCents)}。`
+        : `允许超出 ${maxOverPercent}%（最多 ${yuan(limit)}）仍放不下，能找到的最低约 ${yuan(r.totalCents)}。`);
+    }
+    if (reasons.length) {
+      const minFeasibleCents = missing.length || r.compatibility?.overall === FAIL ? null : r.totalCents;
+      return { id: v.id, label: v.label, targetCents: v.budget, budget, infeasible: true, reasons,
+        minFeasibleCents,
+        suggestions: [
+          minFeasibleCents && `把预算提高到约 ${yuan(Math.ceil(minFeasibleCents / (tierRatios[v.id] ?? 1) / 10000) * 10000)}（这一档的目标预算就能覆盖）`,
+          maxOverPercent === 0 && '关闭严格预算，或允许超出一定比例',
+          scenarios.includes('quiet') && '关闭“安静优先”（它要求金牌电源和更好的散热）',
+          Object.keys(locked).length && '解锁部分配件，让推荐重新挑',
+        ].filter(Boolean),
+        // 找到的部分配件留着，方便看清卡在哪里；不算作方案
+        picks: [], partialPicks: r.picks, partialTotalCents: r.totalCents,
+        totalCents: 0, notes: r.notes, igpu: r.igpu, stockCooler: r.stockCooler, compatibility: r.compatibility };
+    }
+    return { id: v.id, label: v.label, targetCents: v.budget, budget, ...r };
   });
-  // 进阶版与推荐版配置一样时（预算再加也选不出更好的），不重复展示
-  const sameAs = (a, b) => a.picks.map(p => p.item.id).join() === b.picks.map(p => p.item.id).join();
-  return plans.filter((p, i) => i === 0 || !sameAs(p, plans[i - 1]));
+  // 和上一档配置完全一样时照常返回，但标明“与上一档相同”以及原因（预算再加也选不出更好的），不让这一档消失
+  const sameAs = (a, b) => !a.infeasible && !b.infeasible && a.picks.map(p => p.item.id).join() === b.picks.map(p => p.item.id).join();
+  for (let i = 1; i < plans.length; i++) {
+    const prev = plans.slice(0, i).reverse().find(p => sameAs(plans[i], p));
+    if (prev) {
+      plans[i].sameAs = prev.id;
+      plans[i].notes = [`和${prev.label}配置相同：在${yuan(plans[i].targetCents)}的目标预算下，没有找到比${prev.label}更值得多花钱的升级，所以不强行堆料。`, ...plans[i].notes];
+    }
+  }
+  return plans;
 }

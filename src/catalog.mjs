@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { invalid, ApiError } from './api-error.mjs';
 import { peripheralTypes, slotTypes } from './builds.mjs';
+import { enrichSpecs } from './specs-enrich.mjs';
 import { loadPerformance } from './performance.mjs';
 import { cpuKey, gpuKey } from './perfkeys.mjs';
 import { catalogFitStatus, parseCatalogFit } from './catalog-fit.mjs';
@@ -392,6 +393,10 @@ function addPowerEstimates(items) {
   }
   return items.map(item => {
     const s = item.specs ?? {};
+    // 厂商标注的整卡最大功耗是实测规格，优先于同芯片估算
+    if (item.category === 'GPU' && !(s.tdpWatts > 0) && s.boardPowerWatts > 0) {
+      return { ...item, specs: { ...s, tdpWatts: s.boardPowerWatts } };
+    }
     if (item.category === 'GPU' && !(s.tdpWatts > 0)) {
       // 名称写法不统一：先精确匹配，再去掉国内特供的 D / v2 后缀（功耗与标准版相近），再补上漏写的 RTX 前缀
       const exact = gpuChip(item);
@@ -496,6 +501,8 @@ export function createCatalog(directory = '.runtime') {
   const zol = readImported(directory, 'zol-catalog.json');
   const performance = loadPerformance(directory);
   const items = addImages(addTrends(addClassEstimates(addEstimates(addPowerEstimates(addZol(mergeCatalog(imported.items), zol.items)
+    // 从参数表补全接口数量、尺寸、12V 输出等字段（只补缺的，不覆盖）
+    .map(item => (item.rawParams ? { ...item, specs: enrichSpecs(item) } : item))
     .filter(item => !notForDesktop(item))
     .map(item => item.category === 'CPU' && WORKSTATION_CPU.test(item.name) ? { ...item, workstation: true } : item)))), readPriceHistory(directory))
     .map(item => ({

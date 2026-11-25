@@ -198,3 +198,59 @@ test('办公：预算再高 CPU 也最多 ¥1,200，不买游戏 CPU', () => {
   // 游戏用途同样预算会选 X3D
   assert.equal(bySlot(recommend(items, { budgetCents: 1000000, scenarios: ['2k'] })).CPU.id, x3d.id);
 });
+
+test('三档总是都返回：配置相同时标“与上一档相同”，不静默消失', async () => {
+  const { recommendPlans } = await import('../src/recommend.mjs');
+  // 目录只有一档显卡，加预算也换不出更好的
+  const plans = recommendPlans(catalog, { budgetCents: 2000000, scenarios: ['2k'] });
+  assert.deepEqual(plans.map(p => p.id), ['save', 'balanced', 'plus']);
+  for (const p of plans.filter(p => p.sameAs)) assert.match(p.notes[0], /配置相同/);
+});
+
+test('严格预算：每档要么不超目标预算，要么明确无解并给出最低可行预算', async () => {
+  const { recommendPlans } = await import('../src/recommend.mjs');
+  for (const yuan of [3000, 6000, 9000, 15000]) {
+    for (const p of recommendPlans(catalog, { budgetCents: yuan * 100, scenarios: ['2k'], maxOverPercent: 0 })) {
+      if (p.infeasible) {
+        assert.ok(p.reasons.length && p.suggestions.length, `${yuan} ${p.id} 缺原因`);
+        assert.equal(p.picks.length, 0);
+      } else {
+        assert.ok(p.totalCents <= p.targetCents, `${yuan} ${p.id} 超出 ${p.totalCents} > ${p.targetCents}`);
+      }
+      assert.equal(p.budget.inputCents, yuan * 100);
+    }
+  }
+  // 预算明显不够时：无解，最低可行预算高于目标
+  const tight = recommendPlans(catalog, { budgetCents: 300000, scenarios: ['2k'], maxOverPercent: 0 });
+  const bad = tight.find(p => p.infeasible && p.minFeasibleCents);
+  assert.ok(bad && bad.minFeasibleCents > bad.targetCents);
+  // 允许超出 10%：超出部分不超过 10%
+  for (const p of recommendPlans(catalog, { budgetCents: 600000, scenarios: ['2k'], maxOverPercent: 10 })) {
+    if (!p.infeasible) assert.ok(p.totalCents <= p.targetCents * 1.1);
+  }
+});
+
+test('锁定的配件是硬约束；锁定的配件之间不兼容时报告无解', async () => {
+  const { recommendPlans } = await import('../src/recommend.mjs');
+  const lockedCpu = { CPU: { name: 'Intel Core i5-14600K', priceCents: 120000, specs: { socket: 'LGA1700', maxPowerWatts: 181 } } };
+  for (const p of recommendPlans(catalog, { budgetCents: 900000, scenarios: ['2k'], locked: lockedCpu })) {
+    if (p.infeasible) continue;
+    assert.ok(!p.picks.some(x => x.slot === 'CPU'));
+    assert.equal(p.picks.find(x => x.slot === 'MOTHERBOARD').item.specs.socket, 'LGA1700');
+  }
+  const conflict = { MOTHERBOARD: { name: 'B650', priceCents: 80000, specs: { socket: 'AM5', memoryType: 'DDR5', formFactor: 'ATX' } },
+    RAM: { name: 'DDR4', priceCents: 30000, specs: { memoryType: 'DDR4', capacityGB: 32, modules: 2 } } };
+  const plans = recommendPlans(catalog, { budgetCents: 900000, scenarios: ['2k'], locked: conflict });
+  assert.ok(plans.every(p => p.infeasible && p.reasons.some(r => /不兼容/.test(r))));
+});
+
+test('自动推荐里没有确认不兼容的组合，供电关键数据不明时不算“通过”', async () => {
+  const { recommendPlans } = await import('../src/recommend.mjs');
+  for (const sc of ['2k', 'ai', 'office', 'creator']) for (const yuan of [5000, 9000, 15000]) {
+    for (const p of recommendPlans(catalog, { budgetCents: yuan * 100, scenarios: [sc] })) {
+      if (p.infeasible) continue;
+      assert.ok(!p.compatibility.checks.some(c => c.status === 'FAIL'), `${sc} ${yuan} ${p.id}`);
+      if (p.compatibility.checks.some(c => c.critical && c.status === 'UNKNOWN')) assert.notEqual(p.compatibility.overall, 'PASS');
+    }
+  }
+});

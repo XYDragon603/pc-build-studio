@@ -78,6 +78,19 @@ async function serveStatic(staticDir, pathname, response) {
   response.end(body);
 }
 
+/** 锁定的配件（硬约束）：{ CPU: { priceCents, specs, name? } … } */
+function parseLocked(locked) {
+  if (!locked || typeof locked !== 'object' || Array.isArray(locked)) throw invalid('locked 必须为对象');
+  const lockedParts = {};
+  for (const [slot, part] of Object.entries(locked)) {
+    if (!RECOMMEND_SLOTS.includes(slot)) throw invalid('locked 只能包含标准槽位');
+    if (!part || typeof part !== 'object' || (part.priceCents != null && !Number.isSafeInteger(part.priceCents))) throw invalid('locked 配件格式无效');
+    if (part.name != null && (typeof part.name !== 'string' || part.name.length > 160)) throw invalid('locked 配件名称无效');
+    lockedParts[slot] = { priceCents: part.priceCents ?? 0, specs: part.specs && typeof part.specs === 'object' ? part.specs : {}, name: part.name ?? '' };
+  }
+  return lockedParts;
+}
+
 /** 自动配置只用较可靠的价格：系列起价、同类粗估、疑似旧价不参与；服务器 / 工作站 CPU 也不选 */
 const forPlans = item => item.market === 'cn' && !item.possiblyStale && !item.workstation
   && item.estimateBasis !== 'series-low' && item.estimateBasis !== 'class-median';
@@ -148,15 +161,17 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         return;
       }
       if (pathname === '/api/v1/plans' && method === 'POST') {
-        const { budgetCents, scenarios = [], peripherals = [] } = await readJson(request);
+        const { budgetCents, scenarios = [], peripherals = [], maxOverPercent = null, locked = {} } = await readJson(request);
         if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
         if (!Array.isArray(scenarios) || scenarios.length > 8 || !scenarios.every(s => typeof s === 'string' && s.length <= 32)) throw invalid('scenarios 格式无效');
         if (!Array.isArray(peripherals) || !peripherals.every(slot => PERIPHERAL_SLOTS.includes(slot))) throw invalid('peripherals 只能包含 MONITOR、KEYBOARD、MOUSE');
+        // null = 不限；0 = 严格预算；1–50 = 允许超出的百分比
+        if (maxOverPercent !== null && (!Number.isInteger(maxOverPercent) || maxOverPercent < 0 || maxOverPercent > 50)) throw invalid('maxOverPercent 需为 0–50 的整数或 null');
         const items = catalog.all().filter(forPlans);
-        const plans = recommendPlans(items, { budgetCents, scenarios });
+        const plans = recommendPlans(items, { budgetCents, scenarios, maxOverPercent, locked: parseLocked(locked) });
         if (!peripherals.length) return json(response, 200, { plans });
         // 外设不占主机预算：每套方案按自己的显卡和档位单独挑
-        return json(response, 200, { plans: plans.map(plan => ({ ...plan, peripherals: recommendPeripherals(items, {
+        return json(response, 200, { plans: plans.map(plan => (plan.infeasible ? plan : { ...plan, peripherals: recommendPeripherals(items, {
           scenarios, tier: plan.id, igpu: plan.igpu, slots: peripherals,
           gpuIndex: plan.picks.find(pick => pick.slot === 'GPU')?.item.performance?.gaming?.index ?? null,
         }) })) });
@@ -181,14 +196,7 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         const { budgetCents, scenarios = [], locked = {} } = await readJson(request);
         if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
         if (!Array.isArray(scenarios) || scenarios.length > 8 || !scenarios.every(s => typeof s === 'string' && s.length <= 32)) throw invalid('scenarios 格式无效');
-        if (!locked || typeof locked !== 'object' || Array.isArray(locked)) throw invalid('locked 必须为对象');
-        const lockedParts = {};
-        for (const [slot, part] of Object.entries(locked)) {
-          if (!RECOMMEND_SLOTS.includes(slot)) throw invalid('locked 只能包含标准槽位');
-          if (!part || typeof part !== 'object' || (part.priceCents != null && !Number.isSafeInteger(part.priceCents))) throw invalid('locked 配件格式无效');
-          lockedParts[slot] = { priceCents: part.priceCents ?? 0, specs: part.specs && typeof part.specs === 'object' ? part.specs : {} };
-        }
-        return json(response, 200, recommend(catalog.all().filter(forPlans), { budgetCents, scenarios, locked: lockedParts }));
+        return json(response, 200, recommend(catalog.all().filter(forPlans), { budgetCents, scenarios, locked: parseLocked(locked) }));
       }
       if (pathname === '/api/v1/quotes/jd' && method === 'POST') {
         const { skuIds } = await readJson(request);

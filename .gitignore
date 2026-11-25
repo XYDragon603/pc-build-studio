@@ -8,3 +8,6 @@ desktop/app-config.json
 # 商品图片来自第三方网站，仓库公开，不提交（本机程序照常使用）
 data/images/
 data/part-images.json
+
+# 装机测试输出（含 ZOL 目录数据，仓库公开不提交；基线保存在 配置/基线_V1_2026-11-25/）
+配置/
