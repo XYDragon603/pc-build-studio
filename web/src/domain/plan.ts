@@ -3,6 +3,7 @@ import { API_TO_SLOT } from '../api/mapping';
 import { catalogToCandidate } from './catalog';
 import { boardFit, clearance, compatibility, estimatePower, type Check } from './compat';
 import { partFromCandidate } from './demoData';
+import { purposeOfScenarios } from './purposes';
 import { emptySlots } from './slots';
 import type { Build, Part, PartSpecs, SlotId } from './types';
 
@@ -31,7 +32,7 @@ export function emptyBuild(budgetCents: number, scenarios: string[], name: strin
 
 /** 把服务端的推荐方案转成可编辑的配置（价格均为估算） */
 export function planToBuild(plan: PlanResult, budgetCents: number, scenarios: string[]): Build {
-  const b = emptyBuild(budgetCents, scenarios, `${plan.label} · 约 ¥${Math.round(plan.totalCents / 100).toLocaleString('zh-CN')}`);
+  const b = emptyBuild(budgetCents, scenarios, planName(plan.label, scenarios));
   for (const pick of plan.picks) {
     const slot = API_TO_SLOT[pick.slot];
     if (!slot || !pick.item.estimatedPriceCents) continue;
@@ -45,6 +46,15 @@ export function planToBuild(plan: PlanResult, budgetCents: number, scenarios: st
   if (plan.igpu) b.slots.gpu = { locked: false, part: placeholder(INTEGRATED_GPU_NAME, '不配独立显卡') };
   if (plan.stockCooler) b.slots.cooler = { locked: false, part: placeholder(STOCK_COOLER_NAME, '盒装自带，无需另买') };
   return b;
+}
+
+/**
+ * 新方案的默认名：档位 · 用途 · 日期（如“推荐版 · AI / 机器学习 · 11/25”）。
+ * 不放价格：之后改价、换件、参考价更新，名字里的价格就对不上了；实际合计另外显示。
+ */
+export function planName(label: string, scenarios: string[], now = new Date()): string {
+  const purpose = purposeOfScenarios(scenarios)?.label;
+  return [label, purpose, `${now.getMonth() + 1}/${now.getDate()}`].filter(Boolean).join(' · ');
 }
 
 /** 显卡游戏指数（PNY RTX 5080 Slim OC = 100）对应的大致档次 */

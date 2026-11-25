@@ -26,3 +26,12 @@ describe('使用场景', () => {
     expect(vramHint(undefined)).toBeNull();
   });
 });
+
+describe('方案默认名', () => {
+  it('档位 · 用途 · 日期，不含价格', async () => {
+    const { planName } = await import('./plan');
+    expect(planName('推荐版', ['ai', 'quiet'], new Date(2026, 10, 25))).toBe('推荐版 · AI / 机器学习 · 11/25');
+    expect(planName('省钱版', ['quiet'], new Date(2026, 0, 3))).toBe('省钱版 · 1/3');
+    expect(planName('进阶版', ['2k'])).not.toMatch(/¥/);
+  });
+});
