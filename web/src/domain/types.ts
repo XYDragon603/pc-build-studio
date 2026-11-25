@@ -1,4 +1,7 @@
-export type SlotId = 'cpu' | 'gpu' | 'board' | 'ram' | 'ssd' | 'psu' | 'case' | 'cooler';
+export type CoreSlotId = 'cpu' | 'gpu' | 'board' | 'ram' | 'ssd' | 'psu' | 'case' | 'cooler';
+/** 外设：可选，单独计价，不参与兼容性与“还差几件” */
+export type PeripheralId = 'monitor' | 'keyboard' | 'mouse';
+export type SlotId = CoreSlotId | PeripheralId;
 
 /**
  * 候选的报价状态（界面用）：

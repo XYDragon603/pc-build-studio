@@ -3,7 +3,7 @@ import { API_TO_SLOT } from '../api/mapping';
 import { catalogToCandidate } from './catalog';
 import { boardFit, clearance, compatibility, estimatePower, type Check } from './compat';
 import { partFromCandidate } from './demoData';
-import { SLOTS } from './slots';
+import { emptySlots } from './slots';
 import type { Build, Part, PartSpecs, SlotId } from './types';
 
 /** 核显方案里“显卡”一栏的占位配件 */
@@ -23,7 +23,7 @@ export function emptyBuild(budgetCents: number, scenarios: string[], name: strin
     name,
     budgetCents,
     scenarios,
-    slots: Object.fromEntries(SLOTS.map(s => [s.id, { part: null, locked: false }])) as Build['slots'],
+    slots: emptySlots(),
     custom: [],
     updatedAt: new Date().toISOString(),
   };

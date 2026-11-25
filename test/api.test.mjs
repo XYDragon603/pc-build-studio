@@ -70,6 +70,30 @@ test('配置 API 保存与重读整单，保护锁定槽位和并发编辑', asy
   assert.equal((await request(path)).status, 404);
 });
 
+test('外设是可选槽位：可以保存，单独计价，不占主机预算', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'pc-api-test-'));
+  const request = await listen(t, directory);
+  t.after(async () => {
+    for (const name of await readdir(directory)) await unlink(join(directory, name));
+    await rmdir(directory);
+  });
+  const demo = (await request('/builds', 'POST', { preset: 'demo' })).data;
+  const input = { name: demo.name, budgetCents: demo.budgetCents, scenarios: demo.scenarios, slots: [
+    ...demo.slots,
+    { id: 'MONITOR', label: '显示器', locked: false, part: { model: 'AOC Q27G40E', priceCents: 109900, priceSource: 'estimate', specs: {} } },
+    { id: 'MOUSE', label: '鼠标', locked: false, part: { model: '罗技 G304', priceCents: 22900, priceSource: 'estimate', specs: {} } },
+  ] };
+  const saved = (await request('/builds/' + demo.id, 'PUT', { ...input, version: demo.version })).data;
+  assert.equal(saved.slots.find(slot => slot.id === 'MONITOR').label, '显示器');
+  assert.deepEqual([saved.totals.totalCents, saved.totals.peripheralCents, saved.totals.grandTotalCents, saved.totals.remainingCents],
+    [394400, 132800, 527200, 405600]);
+  assert.equal(saved.totals.filledStandardSlots, demo.totals.filledStandardSlots);
+  // 不带外设的旧方案照样能保存
+  assert.equal((await request('/builds', 'POST', { ...input, slots: demo.slots })).status, 201);
+  // 外设 ID 也不能重复
+  assert.equal((await request('/builds', 'POST', { ...input, slots: [...input.slots, input.slots.at(-1)] })).status, 400);
+});
+
 test('草稿跨服务恢复，两份服务同时保存不会覆盖，备份恢复跳过现有方案', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'pc-draft-test-'));
   const request = await listen(t, directory);

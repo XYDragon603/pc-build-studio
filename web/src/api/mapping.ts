@@ -1,8 +1,9 @@
-import { SLOTS } from '../domain/slots';
+import { emptySlots, PERIPHERALS, SLOTS } from '../domain/slots';
 import type { Build, CustomPart, Part, SlotId } from '../domain/types';
 import type { ApiBuild, ApiBuildInput, ApiPart, ApiSlot } from './client';
 
 export const SLOT_TO_API: Record<SlotId, string> = {
+  monitor: 'MONITOR', keyboard: 'KEYBOARD', mouse: 'MOUSE',
   cpu: 'CPU', gpu: 'GPU', board: 'MOTHERBOARD', ram: 'RAM', ssd: 'SSD', psu: 'PSU', case: 'CASE', cooler: 'COOLER',
 };
 export const API_TO_SLOT = Object.fromEntries(Object.entries(SLOT_TO_API).map(([k, v]) => [v, k])) as Record<string, SlotId>;
@@ -46,6 +47,11 @@ export function toApiInput(b: Build): ApiBuildInput {
     locked: b.slots[id].locked && !!b.slots[id].part,
     part: b.slots[id].part ? partToApi(b.slots[id].part!) : null,
   }));
+  // 外设是可选槽位，只在选了配件时提交
+  for (const { id, label } of PERIPHERALS) {
+    const part = b.slots[id]?.part;
+    if (part) slots.push({ id: SLOT_TO_API[id], label, locked: b.slots[id].locked, part: partToApi(part) });
+  }
   for (const c of b.custom) {
     slots.push({
       id: customSlotId(c.id),
@@ -58,7 +64,7 @@ export function toApiInput(b: Build): ApiBuildInput {
 }
 
 export function fromApi(a: ApiBuild | ApiBuildInput): Build {
-  const slots = Object.fromEntries(SLOTS.map(({ id }) => [id, { part: null, locked: false }])) as Build['slots'];
+  const slots = emptySlots();
   const custom: CustomPart[] = [];
   for (const s of a.slots) {
     const slot = API_TO_SLOT[s.id];

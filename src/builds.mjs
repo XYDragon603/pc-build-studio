@@ -9,6 +9,12 @@ export const slotTypes = [
   { id: 'CASE', label: '机箱' }, { id: 'COOLER', label: '散热器' },
 ];
 
+/** 外设：可选槽位（不要求出现），单独计价，不参与兼容性与“还差几件” */
+export const peripheralTypes = [
+  { id: 'MONITOR', label: '显示器' }, { id: 'KEYBOARD', label: '键盘' }, { id: 'MOUSE', label: '鼠标' },
+];
+const peripheralIds = new Set(peripheralTypes.map(type => type.id));
+
 const examples = {
   CPU: ['AMD Ryzen 7 9700X', 145000, { socket: 'AM5' }, 'AM5 · 盒装'],
   MOTHERBOARD: ['B650M WIFI', 79900, { socket: 'AM5', memoryType: 'DDR5' }, 'AM5 · DDR5'],
@@ -109,7 +115,7 @@ export function normalizeBuild(input) {
   const slots = input.slots.map(value => {
     const slot = object(value, 'slot');
     const id = string(slot.id, 'slot.id', 64);
-    const standard = slotTypes.find(type => type.id === id);
+    const standard = slotTypes.find(type => type.id === id) ?? peripheralTypes.find(type => type.id === id);
     if (!standard && !/^custom-[a-z0-9][a-z0-9-]{0,56}$/.test(id)) {
       throw invalid('自定义槽位 ID 必须以 custom- 开头，并仅使用小写字母、数字和连字符');
     }
@@ -161,7 +167,10 @@ function compareSpecs(first, second) {
 
 export function calculateBuild(build) {
   const parts = build.slots.filter(slot => slot.part).map(slot => slot.part);
-  const totalCents = parts.reduce((sum, part) => sum + (part.priceCents ?? 0) * part.quantity, 0);
+  const cost = slots => slots.reduce((sum, slot) => sum + (slot.part?.priceCents ?? 0) * (slot.part?.quantity ?? 0), 0);
+  // 主机合计（含自定义槽位）与预算比较；外设单独计价
+  const totalCents = cost(build.slots.filter(slot => !peripheralIds.has(slot.id)));
+  const peripheralCents = cost(build.slots.filter(slot => peripheralIds.has(slot.id)));
   const lookup = Object.fromEntries(build.slots.map(slot => [slot.id, slot.part]));
   const cpu = lookup.CPU?.specs;
   const board = lookup.MOTHERBOARD?.specs;
@@ -181,7 +190,7 @@ export function calculateBuild(build) {
   }
   return {
     ...build,
-    totals: { totalCents, remainingCents: build.budgetCents - totalCents,
+    totals: { totalCents, peripheralCents, grandTotalCents: totalCents + peripheralCents, remainingCents: build.budgetCents - totalCents,
       unknownPriceCount: parts.filter(part => part.priceCents === null).length,
       filledStandardSlots: slotTypes.filter(type => lookup[type.id]).length },
     compatibility: {

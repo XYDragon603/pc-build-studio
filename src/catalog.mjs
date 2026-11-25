@@ -1,14 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { invalid, ApiError } from './api-error.mjs';
-import { slotTypes } from './builds.mjs';
+import { peripheralTypes, slotTypes } from './builds.mjs';
 import { loadPerformance } from './performance.mjs';
 import { cpuKey, gpuKey } from './perfkeys.mjs';
 import { catalogFitStatus, parseCatalogFit } from './catalog-fit.mjs';
 
 const verified = JSON.parse(readFileSync(new URL('../data/catalog.json', import.meta.url), 'utf8'));
 const verifiedIds = new Set(verified.map(item => item.id));
-const categoryIds = new Set(slotTypes.map(({ id }) => id));
+const categoryIds = new Set([...slotTypes, ...peripheralTypes].map(({ id }) => id));
 const normalize = value => (value ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 
 function readImported(directory, file = 'buildcores-catalog.json') {

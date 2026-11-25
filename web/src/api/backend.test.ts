@@ -136,3 +136,33 @@ describe('保存状态判断', () => {
     expect(sameContent(fromApi(server), b)).toBe(true);
   });
 });
+
+describe('外设槽位', () => {
+  const monitor = { ...candidateById('gpu-galax')!, id: 'monitor-1', slot: 'monitor' as const, name: 'AOC Q27G40E', specs: {} };
+  const withMonitor = buildReducer(demoBuild(), { type: 'addCandidate', candidate: monitor, priceCents: 109900, priceSource: 'estimate' });
+
+  it('外设单独计价，不占主机预算；前后端合计一致', () => {
+    const t = totals(withMonitor);
+    expect([t.totalCents, t.peripheralCents, t.grandTotalCents, t.peripheralCount]).toEqual([394400, 109900, 504300, 1]);
+    expect(t.missing).toEqual(['gpu']);
+    const server = viaBackend(withMonitor).totals;
+    expect([server.totalCents, server.peripheralCents, server.grandTotalCents, server.remainingCents])
+      .toEqual([t.totalCents, t.peripheralCents, t.grandTotalCents, t.remainingCents]);
+  });
+
+  it('保存后读回外设还在；没选外设时不提交外设槽位', () => {
+    const input = toApiInput(withMonitor);
+    expect(input.slots.map(s => s.id)).toContain('MONITOR');
+    expect(input.slots.map(s => s.id)).not.toContain('KEYBOARD');
+    expect(fromApi(input).slots.monitor.part?.name).toBe('AOC Q27G40E');
+    expect(toApiInput(demoBuild()).slots).toHaveLength(8);
+  });
+
+  it('没有外设槽位的旧存档读入时补上空槽位', () => {
+    const old = demoBuild();
+    const { monitor: _m, keyboard: _k, mouse: _o, ...core } = old.slots;
+    const loaded = buildReducer(old, { type: 'load', build: { ...old, slots: core as typeof old.slots } });
+    expect(loaded.slots.monitor).toEqual({ part: null, locked: false });
+    expect(totals(loaded).peripheralCount).toBe(0);
+  });
+});

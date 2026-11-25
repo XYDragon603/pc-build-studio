@@ -1,5 +1,5 @@
 import { partFromCandidate } from './demoData';
-import { SLOTS } from './slots';
+import { PERIPHERALS, SLOTS, withAllSlots } from './slots';
 import type { Build, Candidate, CustomPart, Part, PartSpecs, SlotId } from './types';
 
 export type BuildAction =
@@ -71,7 +71,8 @@ export function buildReducer(b: Build, a: BuildAction): Build {
     case 'markSaved':
       return { ...b, id: a.serverId, serverId: a.serverId, version: a.version, updatedAt: a.updatedAt };
     case 'load':
-      return a.build;
+      // 旧存档没有外设槽位，读入时补上
+      return withAllSlots(a.build);
   }
 }
 
@@ -79,8 +80,14 @@ export interface BuildTotals {
   filled: number;
   slotCount: number;
   missing: SlotId[];
+  /** 主机合计（8 个配件 + 自定义项），与预算比较 */
   totalCents: number;
   remainingCents: number;
+  /** 外设（显示器、键盘、鼠标）单独计价，不占主机预算 */
+  peripheralCents: number;
+  peripheralCount: number;
+  /** 主机 + 外设 */
+  grandTotalCents: number;
   /** 已选但价格未知的项目数量（不计入合计） */
   unknownPriceCount: number;
   /** 已选配件中仍是演示价格的数量 */
@@ -109,12 +116,25 @@ export function totals(b: Build): BuildTotals {
     if (c.priceCents == null) unknownPriceCount++;
     else totalCents += c.priceCents;
   }
+  let peripheralCents = 0;
+  let peripheralCount = 0;
+  for (const { id } of PERIPHERALS) {
+    const part = b.slots[id]?.part;
+    if (!part) continue;
+    peripheralCount++;
+    if (part.priceSource === 'estimate') estimateCount++;
+    if (part.priceCents == null) unknownPriceCount++;
+    else peripheralCents += part.priceCents * part.quantity;
+  }
   return {
     filled: SLOTS.length - missing.length,
     slotCount: SLOTS.length,
     missing,
     totalCents,
     remainingCents: b.budgetCents - totalCents,
+    peripheralCents,
+    peripheralCount,
+    grandTotalCents: totalCents + peripheralCents,
     unknownPriceCount,
     demoPriceCount,
     estimateCount,

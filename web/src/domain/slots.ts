@@ -1,4 +1,4 @@
-import type { SlotId } from './types';
+import type { Build, PeripheralId, SlotId } from './types';
 
 export interface SlotDef {
   id: SlotId;
@@ -23,4 +23,23 @@ export const SLOTS: SlotDef[] = [
 
 export const SLOT_IDS = SLOTS.map(s => s.id);
 
-export const slotDef = (id: SlotId): SlotDef => SLOTS.find(s => s.id === id)!;
+/** 外设一栏（不在 SLOTS 里：SLOTS 只表示主机的 8 个必需配件） */
+export const PERIPHERALS: (SlotDef & { id: PeripheralId })[] = [
+  { id: 'monitor', label: '显示器', noun: '显示器', missingPhrase: '一台显示器' },
+  { id: 'keyboard', label: '键盘', noun: '键盘', missingPhrase: '一把键盘' },
+  { id: 'mouse', label: '鼠标', noun: '鼠标', missingPhrase: '一个鼠标' },
+];
+
+export const ALL_SLOTS: SlotDef[] = [...SLOTS, ...PERIPHERALS];
+
+export const isPeripheral = (id: SlotId): id is PeripheralId => PERIPHERALS.some(p => p.id === id);
+
+export const slotDef = (id: SlotId): SlotDef => ALL_SLOTS.find(s => s.id === id)!;
+
+/** 全部槽位都为空 */
+export const emptySlots = (): Build['slots'] =>
+  Object.fromEntries(ALL_SLOTS.map(s => [s.id, { part: null, locked: false }])) as Build['slots'];
+
+/** 旧存档没有外设槽位，读入时补上空槽位 */
+export const withAllSlots = (b: Build): Build =>
+  ALL_SLOTS.every(s => b.slots[s.id]) ? b : { ...b, slots: { ...emptySlots(), ...b.slots } };

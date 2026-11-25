@@ -99,6 +99,9 @@ export function demoBuild(): Build {
     psu: fill('psu-650'),
     case: fill('case-matx-quiet'),
     cooler: fill('cooler-dual-tower'),
+    monitor: { part: null, locked: false },
+    keyboard: { part: null, locked: false },
+    mouse: { part: null, locked: false },
   };
   return {
     id: 'demo-2k',
@@ -112,5 +115,5 @@ export function demoBuild(): Build {
 }
 
 export const DEFAULT_QUERY: Record<SlotId, string> = {
-  cpu: '9700X 盒装', gpu: 'RTX 5060 Ti 16GB', board: '', ram: 'DDR5', ssd: 'NVMe', psu: '', case: 'mATX', cooler: '',
+  cpu: '9700X 盒装', gpu: 'RTX 5060 Ti 16GB', board: '', ram: 'DDR5', ssd: 'NVMe', psu: '', case: 'mATX', cooler: '', monitor: '', keyboard: '', mouse: '',
 };
