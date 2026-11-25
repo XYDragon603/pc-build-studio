@@ -169,3 +169,20 @@ test('预算有余量时同插槽升级 CPU（游戏按游戏指数）；办公�
   const office = recommend(items, { budgetCents: 900000, scenarios: ['office'], igpu: true });
   assert.ok(!/余量/.test(office.picks.find(p => p.slot === 'CPU')?.reason ?? ''));
 });
+
+test('同档显卡不挑明显偏低的价格（低于中位价 75% 的多半是旧价 / 错价）', () => {
+  const gpu = (cents, len) => ({ ...item('GPU', cents, { chipset: 'GeForce RTX 5060 Ti', capacityGB: 16, lengthMm: len, recommendedPsuWatts: 550 }), performance: { gaming: { index: 50 } } });
+  const odd = gpu(250000, 260);
+  const gpus = [odd, gpu(380000, 270), gpu(390000, 280), gpu(400000, 290)];
+  const r = bySlot(recommend([...catalog.filter(i => i.category !== 'GPU'), ...gpus], { budgetCents: 1000000, scenarios: ['2k'] }));
+  assert.notEqual(r.GPU.id, odd.id);
+  assert.equal(r.GPU.estimatedPriceCents, 380000);
+});
+
+test('显卡没有任何功耗数据时，电源按游戏指数保守选，不当成 0W', () => {
+  const flagship = [400000, 410000].map(cents => ({ ...item('GPU', cents, { chipset: 'GeForce RTX 5090 D v2', capacityGB: 24, lengthMm: 330 }), performance: { gaming: { index: 132 } } }));
+  const psus = [item('PSU', 30000, { ratedWatts: 650, efficiency: '铜牌' }), item('PSU', 120000, { ratedWatts: 1000, efficiency: '金牌' })];
+  const items = [...catalog.filter(i => i.category !== 'GPU' && i.category !== 'PSU'), ...flagship, ...psus];
+  const r = bySlot(recommend(items, { budgetCents: 1200000, scenarios: ['2k'] }));
+  assert.equal(r.PSU.specs.ratedWatts, 1000);
+});

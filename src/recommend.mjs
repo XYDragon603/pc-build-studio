@@ -273,7 +273,8 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
   let gpuTier = -1;
   const pickGpu = tier => {
     const g = gpuGroups[tier];
-    const item = cheapestOf(g.list);
+    // 挑这一档里最便宜的，但不低于中位价的 75%：明显偏低的多半是旧价或错价（如中位 ¥16,999 的卡标 ¥10,999）
+    const item = cheapestOf(g.list.filter(i => price(i) >= g.median * 0.75)) ?? cheapestOf(g.list);
     const detail = profile.gpu === 'ai'
       ? `显存 ${g.vram}GB${g.nvidia ? '，NVIDIA（CUDA）' : ''}${g.compute != null ? `，Blender 算力 ${Math.round(g.compute)}` : ''}`
       : profile.gpu === 'creator'
@@ -300,7 +301,11 @@ function recommendOnce(items, { budgetCents, scenarios = [], locked: lockedInput
       const cpu = specsOf('CPU') ?? {};
       const est = cpu.maxPowerWatts && (gpu.maxPowerWatts ?? gpu.tdpWatts) ? Math.ceil((cpu.maxPowerWatts + (gpu.maxPowerWatts ?? gpu.tdpWatts) + 75) * 1.25) : 0;
       // 核显机功耗低，300W 起；独显机 450W 起
-      const need = Math.max(gpu.recommendedPsuWatts ?? 0, est, igpu ? 300 : 450);
+      // 显卡完全没有功耗数据时不能当 0W：按游戏指数保守估（旗舰级 1000W、高端 850W、中端 650W）
+      const gpuIndex = picks.GPU?.item.performance?.gaming?.index ?? null;
+      const unknownGpuPower = !igpu && picks.GPU && !(gpu.maxPowerWatts ?? gpu.tdpWatts) && !gpu.recommendedPsuWatts;
+      const guess = !unknownGpuPower ? 0 : gpuIndex >= 100 ? 1000 : gpuIndex >= 65 ? 850 : 650;
+      const need = Math.max(gpu.recommendedPsuWatts ?? 0, est, guess, igpu ? 300 : 450);
       let pool = pools.PSU.filter(i => (i.specs.ratedWatts ?? 0) >= need);
       const gold = pool.filter(i => /金|GOLD|白金|PLATINUM|钛金|TITANIUM/i.test(i.specs.efficiency ?? ''));
       if (scenarios.includes('quiet') && gold.length) pool = gold;

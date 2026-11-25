@@ -393,7 +393,11 @@ function addPowerEstimates(items) {
   return items.map(item => {
     const s = item.specs ?? {};
     if (item.category === 'GPU' && !(s.tdpWatts > 0)) {
-      const samples = chipTdp.get(gpuChip(item));
+      // 名称写法不统一：先精确匹配，再去掉国内特供的 D / v2 后缀（功耗与标准版相近），再补上漏写的 RTX 前缀
+      const exact = gpuChip(item);
+      const base = exact?.replace(/(d|dv2|v2)$/, '');
+      const candidates = [exact, base, base && /^\d{4}/.test(base) ? 'rtx' + base : null].filter(Boolean);
+      const samples = candidates.map(key => chipTdp.get(key)).find(list => list?.length);
       if (samples?.length) return { ...item, specs: { ...s, tdpWatts: median(samples) }, estimatedSpecs: ['tdpWatts'] };
     }
     if (item.category === 'CPU' && !(s.maxPowerWatts > 0) && s.tdpWatts > 0) {

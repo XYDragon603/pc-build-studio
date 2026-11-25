@@ -426,11 +426,15 @@ test('缺功耗时估算：显卡取同芯片 TDP 中位数，AMD 按 PPT，Inte
   const part = (id, name, category, specs) => ({ id, name, category, specs });
   const request = await estimateFixture(t, [
     part('zol-1650', '七彩虹 GTX 1650 4G', 'GPU', { chipset: 'GeForce GTX 1650', recommendedPsuWatts: 300 }),
+    part('zol-5090dv2', '万丽 RTX 5090 D v2', 'GPU', { chipset: 'GeForce RTX 5090 D v2', capacityGB: 24 }),
+    part('zol-5070ti', '某品牌 5070 Ti', 'GPU', { chipset: 'GeForce 5070 Ti', capacityGB: 16 }),
     part('zol-4100', 'AMD Ryzen 3 4100', 'CPU', { tdpWatts: 65 }),
     part('zol-12400', 'Intel 酷睿 i5 12400', 'CPU', { tdpWatts: 65 }),
     part('zol-own', 'AMD Ryzen 5 7600', 'CPU', { tdpWatts: 65, maxPowerWatts: 88 }),
   ], [
     part('buildcores-1650a', 'GTX 1650 A', 'GPU', { chipset: 'GeForce GTX 1650 4 GB', tdpWatts: 75 }),
+    part('buildcores-5090', 'RTX 5090 A', 'GPU', { chipset: 'GeForce RTX 5090', tdpWatts: 575 }),
+    part('buildcores-5070ti', 'RTX 5070 Ti A', 'GPU', { chipset: 'GeForce RTX 5070 Ti', tdpWatts: 300 }),
     part('buildcores-1650b', 'GTX 1650 B', 'GPU', { chipset: 'GeForce GTX 1650', tdpWatts: 75 }),
     part('buildcores-1650c', 'GTX 1650 C', 'GPU', { chipset: 'GeForce GTX 1650', tdpWatts: 90 }),
     part('buildcores-i5a', 'Intel Core i5-13400', 'CPU', { tdpWatts: 65, maxPowerWatts: 148 }),
@@ -441,6 +445,9 @@ test('缺功耗时估算：显卡取同芯片 TDP 中位数，AMD 按 PPT，Inte
   assert.deepEqual([(await get('zol-1650')).specs.tdpWatts, (await get('zol-1650')).estimatedSpecs], [75, ['tdpWatts']]);
   assert.deepEqual([(await get('zol-4100')).specs.maxPowerWatts, (await get('zol-4100')).estimatedSpecs], [88, ['maxPowerWatts']]);
   assert.equal((await get('zol-12400')).specs.maxPowerWatts, 148);
+  // 国内特供 D / v2、漏写 RTX 前缀的显卡按标准版功耗补
+  assert.equal((await get('zol-5090dv2')).specs.tdpWatts, 575);
+  assert.equal((await get('zol-5070ti')).specs.tdpWatts, 300);
   const own = await get('zol-own');
   assert.deepEqual([own.specs.maxPowerWatts, own.estimatedSpecs], [88, undefined]);
 });
