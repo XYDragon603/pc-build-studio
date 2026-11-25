@@ -95,7 +95,8 @@ function parseLocked(locked) {
     if (!RECOMMEND_SLOTS.includes(slot)) throw invalid('locked 只能包含标准槽位');
     if (!part || typeof part !== 'object' || (part.priceCents != null && !Number.isSafeInteger(part.priceCents))) throw invalid('locked 配件格式无效');
     if (part.name != null && (typeof part.name !== 'string' || part.name.length > 160)) throw invalid('locked 配件名称无效');
-    lockedParts[slot] = { priceCents: part.priceCents ?? 0, specs: part.specs && typeof part.specs === 'object' ? part.specs : {}, name: part.name ?? '' };
+    lockedParts[slot] = { priceCents: part.priceCents ?? 0, specs: part.specs && typeof part.specs === 'object' ? part.specs : {}, name: part.name ?? '',
+      ...(slot === 'GPU' && part.igpu === true ? { igpu: true } : {}) };
   }
   return lockedParts;
 }

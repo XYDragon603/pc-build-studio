@@ -12,6 +12,7 @@ export type Market = 'cn' | 'global';
 export const ESTIMATE_LABELS: Record<EstimateBasis, string> = {
   reference: 'ZOL 参考价（非实时）', model: '同型号 ZOL 参考价（非实时）', 'chip-median': '同芯片中位价', 'spec-median': '同规格中位价',
   'class-median': '同类配件粗估，误差较大', 'series-low': 'ZOL 系列起价（最小容量），实际容量可能更贵',
+  manual: '我的价格（手动录入）', verified: '我的价格（已核实商城报价）',
 };
 
 export const PRICE_NOTE = '参考价来自中关村在线，不是实时价格；内存、固态近期涨价快，下单前以电商实际售价为准，填进“实付价”后合计按实付计算。';

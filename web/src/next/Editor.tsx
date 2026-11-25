@@ -1,4 +1,4 @@
-import { AlertTriangle, BadgeCheck, RefreshCw, CheckCircle2, CircleDollarSign, Download, Gamepad2, Loader2, Lock, Pencil, PieChart, Repeat, Save, Trash2, VolumeX, Wallet, XCircle } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, RefreshCw, WandSparkles, CheckCircle2, CircleDollarSign, Download, Gamepad2, Loader2, Lock, LockOpen, Pencil, PieChart, Repeat, Save, Trash2, VolumeX, Wallet, XCircle } from 'lucide-react';
 import { useEffect, useMemo, type Dispatch, type ReactNode } from 'react';
 import { SLOT_ICONS } from '../components/icons';
 import { totals, type BuildAction } from '../domain/build';
@@ -6,7 +6,7 @@ import { estimatePower, type Check } from '../domain/compat';
 import { formatYuan } from '../domain/money';
 import { purposeOfScenarios } from '../domain/purposes';
 import { buildChecks, compatSummary, INTEGRATED_GPU_NAME, STOCK_COOLER_NAME } from '../domain/plan';
-import { ALL_SLOTS, PERIPHERALS, SLOTS } from '../domain/slots';
+import { ALL_SLOTS, isPeripheral, PERIPHERALS, SLOTS } from '../domain/slots';
 import type { Build, SlotId } from '../domain/types';
 import { ESTIMATE_LABELS, PRICE_NOTE, priceChanges, STALE_NOTE, staleSpecs, useCatalogItems } from './data';
 import { Thumb } from './Thumb';
@@ -24,6 +24,9 @@ interface Props {
   saveText: string;
   draftStatus: string;
   onExport: () => void;
+  /** 保留锁定的配件，其余重新优化 */
+  onReoptimize: () => void;
+  reoptimizing: boolean;
 }
 
 const CHECK_ICONS = { ok: CheckCircle2, warn: AlertTriangle, error: XCircle };
@@ -38,7 +41,7 @@ function CheckRow({ check }: { check: Check }) {
   );
 }
 
-export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePicker, onEditPrice, onSave, saving, saveText, draftStatus, onExport }: Props) {
+export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePicker, onEditPrice, onSave, saving, saveText, draftStatus, onExport, onReoptimize, reoptimizing }: Props) {
   const t = totals(build);
   const checks = useMemo(() => buildChecks(build), [build]);
   const summary = compatSummary(checks);
@@ -60,6 +63,7 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
     return catalogId ? items[catalogId]?.estimatedSpecs?.some(f => f === 'tdpWatts' || f === 'maxPowerWatts') : false;
   });
   const over = t.remainingCents < 0;
+  const lockedCount = SLOTS.filter(s => build.slots[s.id].locked).length;
   const status = summary.level === 'ok' && bios ? 'warn' : summary.level;
   const StatusIcon = CHECK_ICONS[status];
 
@@ -84,7 +88,7 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
             </span>
           </button>
         </td>
-        <td className="nx-amount" title={reference == null || placeholder ? undefined : item?.possiblyStale ? `${basis} · ${STALE_NOTE}` : basis}>
+        <td className="nx-amount" title={reference == null || placeholder ? undefined : [basis, item?.priceObservedAt && `采集于 ${item.priceObservedAt.slice(0, 10)}`, item?.possiblyStale && STALE_NOTE].filter(Boolean).join(' · ')}>
           {reference == null || placeholder ? '—' : formatYuan(reference)}
           {item?.possiblyStale && !placeholder && <small className="nx-stale">可能是旧价</small>}
         </td>
@@ -98,6 +102,7 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
             {locked
               ? <button type="button" className="nx-icon-btn" title="解锁" aria-label={`解锁${label}`} onClick={() => dispatch({ type: 'toggleLock', slot: id })}><Lock size={15} /></button>
               : <button type="button" className="nx-icon-btn" title={part ? '更换' : '选择'} aria-label={`${part ? '更换' : '选择'}${label}`} onClick={() => onPick(id)}><Repeat size={15} /></button>}
+            {part && !locked && !isPeripheral(id) && <button type="button" className="nx-icon-btn" title="锁定：重新优化时保留这件" aria-label={`锁定${label}`} onClick={() => dispatch({ type: 'toggleLock', slot: id })}><LockOpen size={15} /></button>}
             {part && !locked && <button type="button" className="nx-icon-btn nx-remove" aria-label={`移除${label}`} title="移除" onClick={() => dispatch({ type: 'removePart', slot: id })}><Trash2 size={15} /></button>}
           </span>
         </td>
@@ -166,6 +171,9 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
         </div>
         {status !== 'ok' && <button type="button" className={`nx-tag ${status}`} title={summary.text} onClick={onClosePicker}><StatusIcon size={17} />{summary.level === 'ok' && bios ? bios.label : '兼容性待核对'}</button>}
         <div className="nx-footer-actions">
+          {lockedCount > 0 && lockedCount < SLOTS.length && <button type="button" className="nx-btn nx-btn-outline" onClick={onReoptimize} disabled={reoptimizing}
+            title={`保留已锁定的 ${lockedCount} 件，其余按预算 ${formatYuan(build.budgetCents)} 和当前用途重新挑选（锁定的配件作为硬约束）`}>
+            {reoptimizing ? <Loader2 className="spin" /> : <WandSparkles size={17} />}重新优化其余</button>}
           <button type="button" className="nx-btn nx-btn-outline" onClick={onExport}><Download size={17} />导出清单</button>
           <button type="button" className="nx-btn nx-btn-primary" onClick={onSave} disabled={saving}>{saving ? <Loader2 className="spin" /> : <Save size={17} />}保存方案</button>
         </div>

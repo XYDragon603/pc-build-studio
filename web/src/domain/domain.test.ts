@@ -93,3 +93,14 @@ describe('金额解析', () => {
     expect(parseYuan(input)).toBe(out);
   });
 });
+
+describe('导出清单', () => {
+  it('包含价格来源列、非实时说明和兼容性状态图例', async () => {
+    const { buildMarkdown } = await import('./exportList');
+    const md = buildMarkdown(demoBuild(), true);
+    expect(md).toContain('| 价格来源 |');
+    expect(md).toContain('不是实时价格');
+    expect(md).toContain('图例：✓ 通过');
+    expect(md).toMatch(/^- [✓!?✗–] /m);
+  });
+});

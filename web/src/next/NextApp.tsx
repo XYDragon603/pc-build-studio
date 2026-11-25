@@ -1,18 +1,20 @@
-import { Folder, LayoutGrid, Layers, PencilLine } from 'lucide-react';
+import { Folder, LayoutGrid, Layers, PencilLine, Tags } from 'lucide-react';
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { api, ApiError, type CatalogItem, type PlanResult } from '../api/client';
-import { fromApi, sameContent, toApiInput } from '../api/mapping';
+import { fromApi, sameContent, SLOT_TO_API, toApiInput } from '../api/mapping';
 import type { PlanSummary } from '../components/PlansDialog';
 import { PriceDialog, type PriceRequest } from '../components/PriceDialog';
 import { buildReducer } from '../domain/build';
 import { catalogToCandidate } from '../domain/catalog';
 import { buildMarkdown, downloadText } from '../domain/exportList';
-import { emptyBuild, INTEGRATED_GPU_NAME, isIntegratedGpu, planToBuild } from '../domain/plan';
-import { SLOT_IDS, slotDef } from '../domain/slots';
+import { emptyBuild, INTEGRATED_GPU_NAME, isIntegratedGpu, planToBuild, STOCK_COOLER_NAME } from '../domain/plan';
+import { formatYuan } from '../domain/money';
+import { SLOT_IDS, SLOTS, slotDef } from '../domain/slots';
 import type { Build, Candidate, SlotId } from '../domain/types';
 import { Editor } from './Editor';
 import { Home, type PlanGeneration, type Purpose } from './Home';
 import { PartPicker } from './PartPicker';
+import { PriceManager } from './PriceManager';
 import { SavedPlans } from './SavedPlans';
 import { useDraft } from './useDraft';
 import './next.css';
@@ -32,12 +34,13 @@ const integratedGpuCandidate: Candidate = {
   store: 'other', storeLabel: '', condition: 'new', priceCents: 0, state: 'confirmed', url: null, specs: {},
 };
 
-type View = 'home' | 'editor' | 'plans' | 'catalog';
+type View = 'home' | 'editor' | 'plans' | 'catalog' | 'prices';
 const NAV = [
   { view: 'home', icon: Layers, label: '方案推荐' },
   { view: 'editor', icon: PencilLine, label: '配置编辑' },
   { view: 'plans', icon: Folder, label: '我的方案' },
   { view: 'catalog', icon: LayoutGrid, label: '配件库' },
+  { view: 'prices', icon: Tags, label: '价格管理' },
 ] as const;
 
 export default function NextApp() {
@@ -52,6 +55,7 @@ export default function NextApp() {
   const editorOpened = useRef(false);
   const [saved, setSaved] = useState<Build | null>(null);
   const [saving, setSaving] = useState(false);
+  const [reoptimizing, setReoptimizing] = useState(false);
   const [pickerSlot, setPickerSlot] = useState<SlotId | null>(null);
   const [priceReq, setPriceReq] = useState<PriceRequest | null>(null);
   const [catalogSlot, setCatalogSlot] = useState<SlotId>('gpu');
@@ -88,6 +92,36 @@ export default function NextApp() {
       setToast('这颗 CPU 没有核显，需要再配一张独立显卡');
     } else {
       setToast(priceCents === null ? `已选择 ${item.name}，请填写实付价` : `已换成 ${item.name}`);
+    }
+  };
+
+  /** 保留锁定的配件（硬约束），其余按当前预算和用途重新优化（取推荐版） */
+  const reoptimize = async () => {
+    const locked: Record<string, { priceCents: number; specs: object; name: string; igpu?: boolean }> = {};
+    for (const { id } of SLOTS) {
+      const { part, locked: isLocked } = build.slots[id];
+      if (!isLocked || !part || part.name === STOCK_COOLER_NAME) continue;
+      locked[SLOT_TO_API[id]] = part.name === INTEGRATED_GPU_NAME
+        ? { priceCents: 0, specs: {}, name: part.name, igpu: true }
+        : { priceCents: part.priceCents ?? 0, specs: part.specs, name: part.name };
+    }
+    setReoptimizing(true);
+    try {
+      const plans = await api.plans({ budgetCents: build.budgetCents, scenarios: build.scenarios, locked, maxOverPercent: null });
+      const plan = plans.find(p => p.id === 'balanced' && !p.infeasible) ?? plans.find(p => !p.infeasible);
+      if (!plan) {
+        setToast(plans[0]?.reasons?.[0] ?? '锁定的配件之间无法组成完整方案');
+        return;
+      }
+      const next = planToBuild(plan, build.budgetCents, build.scenarios);
+      const slots = { ...build.slots };
+      for (const { id } of SLOTS) if (!build.slots[id].locked) slots[id] = next.slots[id];
+      dispatch({ type: 'load', build: { ...build, slots, updatedAt: new Date().toISOString() } });
+      setToast(`已按锁定配件重新优化（${plan.label}，约 ${formatYuan(plan.totalCents)}）`);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : '重新优化失败');
+    } finally {
+      setReoptimizing(false);
     }
   };
 
@@ -251,6 +285,8 @@ export default function NextApp() {
             saveText={saveText}
             draftStatus={draftStatus}
             onExport={exportList}
+            onReoptimize={reoptimize}
+            reoptimizing={reoptimizing}
           />
         )}
         {view === 'plans' && <SavedPlans
@@ -258,6 +294,7 @@ export default function NextApp() {
           onLoad={loadPlan} onDelete={removePlan} onResume={resume} onNew={() => navigate('home')}
           onBackup={backupPlans} onRestore={restorePlans}
         />}
+        {view === 'prices' && <PriceManager onToast={setToast} />}
         {view === 'catalog' && (
           <div className="nx-page nx-catalog">
             <header className="nx-page-head"><h1>配件库</h1><p className="nx-muted">筛选型号、比较规格和估算价</p></header>

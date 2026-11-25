@@ -126,7 +126,7 @@
 .nx-build-panel .nx-section-head > span { font-size: 13px; }
 .nx-table-scroll, .nx-inspector-scroll, .nx-pick-list, .nx-comparison-scroll, .nx-saved-list ul, .nx-saved-preview ul { min-height: 0; flex: 1; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .nx-table-scroll { padding: 0 10px 10px; container-type: size; }
-.nx-build-table { --slot-col: 86px; --price-col: 73px; --action-col: 73px; border-collapse: separate; border-spacing: 0; width: 100%; table-layout: fixed; font-size: 13px; }
+.nx-build-table { --slot-col: 86px; --price-col: 73px; --action-col: 104px; border-collapse: separate; border-spacing: 0; width: 100%; table-layout: fixed; font-size: 13px; }
 .nx-build-table th, .nx-build-table td { padding: 5px 7px; text-align: left; border-bottom: 1px solid var(--line); }
 .nx-build-table thead th { position: sticky; top: 0; background: var(--surface-2); z-index: 1; font-weight: 650; white-space: nowrap; }
 .nx-build-table thead th:first-child { border-radius: 7px 0 0 0; width: var(--slot-col); }
@@ -254,7 +254,7 @@
   .nx-page { padding: 16px 13px; }
   .nx-editor-content, .nx-saved-content { grid-template-columns: minmax(0, 1.5fr) minmax(285px, 1fr); }
   .nx-build-table th, .nx-build-table td { padding-inline: 4px; }
-  .nx-build-table { --slot-col: 72px; --price-col: 59px; --action-col: 57px; }
+  .nx-build-table { --slot-col: 72px; --price-col: 59px; --action-col: 86px; }
   .nx-row-actions .nx-icon-btn { width: 25px; }
   .nx-row-product .nx-thumb { width: 42px; height: 40px; }
   .nx-footer-metrics { gap: 7px; }
@@ -325,3 +325,33 @@
 .nx-plan-infeasible { border-style: dashed; }
 .nx-plan-reasons, .nx-plan-suggest ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.55; color: var(--ink); display: grid; gap: 4px; }
 .nx-plan-suggest { font-size: 13px; color: var(--ink-2); display: grid; gap: 4px; }
+
+/* 综合评分 */
+.nx-plan-score { font-size: 13px; }
+.nx-plan-score .nx-link strong { margin-left: 2px; font-size: 15px; color: var(--ink); }
+.nx-score-parts { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.nx-score-parts li { display: grid; grid-template-columns: 9.5em 1fr 2.5em; align-items: center; gap: 8px; color: var(--ink-2); }
+.nx-score-parts li > span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.nx-score-parts li.warn { color: var(--amber); }
+.nx-score-bar { height: 6px; border-radius: 3px; background: var(--surface-2, #eef2f7); overflow: hidden; }
+.nx-score-bar i { display: block; height: 100%; background: var(--accent, #2563eb); border-radius: 3px; }
+
+/* 价格管理 */
+.nx-prices { overflow-y: auto; }
+.nx-prices .nx-panel { display: grid; gap: 12px; padding: 16px 18px; flex: none; }
+.nx-prices .nx-table-scroll { container-type: normal; padding: 0; }
+.nx-prices .nx-section-head { padding: 0; flex-wrap: wrap; justify-content: space-between; }
+.nx-prices h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 17px; }
+.nx-price-form > label > input, .nx-price-form > label > select { height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; }
+.nx-price-form > label > input:focus, .nx-price-form > label > select:focus { outline: 2px solid var(--focus-ring); border-color: var(--accent-border); }
+.nx-price-form .nx-search { min-height: 36px; border-radius: var(--radius-sm); }
+.nx-price-form > div.wide { display: grid; gap: 4px; align-self: end; }
+.nx-price-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: end; }
+.nx-price-form > label { display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
+.nx-price-form > label > input, .nx-price-form > label > select { min-width: 0; }
+.nx-price-form .wide { grid-column: span 2; }
+.nx-prices-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.nx-prices-table th, .nx-prices-table td { padding: 6px 8px; border-bottom: 1px solid var(--line, #e5e7eb); text-align: left; vertical-align: top; }
+.nx-prices-table td.nx-amount { text-align: right; white-space: nowrap; }
+.nx-prices-errors { margin: 0; padding-left: 18px; font-size: 12px; color: var(--danger); max-height: 160px; overflow: auto; }
+.nx-prices-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

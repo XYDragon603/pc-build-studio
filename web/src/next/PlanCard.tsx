@@ -1,6 +1,6 @@
-import { AlertTriangle, CheckCircle2, ChevronDown, Copy, Crown, Leaf, Pencil, Rocket, SearchX, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, Copy, Crown, Gauge, Leaf, Pencil, Rocket, SearchX, XCircle } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { PlanResult } from '../api/client';
+import type { PlanResult, ScorePart } from '../api/client';
 import { API_TO_SLOT } from '../api/mapping';
 import { formatYuan } from '../domain/money';
 import { vramHint } from '../domain/purposes';
@@ -14,6 +14,28 @@ const COMPARISON_SLOTS = ['gpu', 'cpu', 'ram', 'ssd'] as const;
 const COMPARISON_IDS = new Set<string>(COMPARISON_SLOTS);
 
 const TIER_NAMES = { save: '省钱版', balanced: '推荐版', plus: '进阶版' } as const;
+
+const SCORE_LABELS: Record<ScorePart, string> = { gpu: '显卡', cpu: 'CPU', memory: '内存', storage: '硬盘', quality: '电源 / 主板 / 散热品质', noise: '安静程度', trust: '数据可信度' };
+
+/** 综合评分（0–100）与分项：分项是同一目录里候选之间的相对值，不代表实际帧数 */
+function ScoreBlock({ score, office }: { score: NonNullable<PlanResult['score']>; office: boolean }) {
+  const [open, setOpen] = useState(false);
+  const parts = (Object.keys(SCORE_LABELS) as ScorePart[]).filter(k => score.parts[k] != null && !(office && k === 'gpu'));
+  return (
+    <div className="nx-plan-score">
+      <button type="button" className="nx-link" aria-expanded={open} onClick={() => setOpen(v => !v)}
+        title={`按用途加权的整机评分（评分配置 ${score.version}）。分项是同一配件库里候选之间的相对值，用来比较方案，不代表实际帧数或 AI 吞吐。`}>
+        <Gauge size={15} aria-hidden /> 综合评分 <strong>{score.total.toFixed(1)}</strong><ChevronDown size={14} className={open ? 'rot' : ''} />
+      </button>
+      {open && <ul className="nx-score-parts">
+        {parts.map(k => (
+          <li key={k}><span>{SCORE_LABELS[k]}</span><span className="nx-score-bar" aria-hidden><i style={{ width: `${score.parts[k]}%` }} /></span><span>{score.parts[k]}</span></li>
+        ))}
+        {score.bottleneck > 0 && <li className="warn"><span>CPU 拖后腿扣分</span><span /><span>−{score.bottleneck}</span></li>}
+      </ul>}
+    </div>
+  );
+}
 
 export function PlanCard(props: { plan: PlanResult; budgetCents: number; scenarios: string[]; onChoose: () => void }) {
   return props.plan.infeasible ? <InfeasibleCard {...props} /> : <FeasibleCard {...props} />;
@@ -58,6 +80,8 @@ function FeasibleCard({ plan, budgetCents, scenarios, onChoose }: { plan: PlanRe
   const summary = useMemo(() => compatSummary(buildChecks(planToBuild(plan, budgetCents, scenarios))), [plan, budgetCents, scenarios]);
   const diff = plan.targetCents - plan.totalCents;
   const notes = plan.notes.filter(n => !n.startsWith('价格为参考价估算'));
+  const userPriced = plan.picks.filter(p => p.item.priceSource === 'user').length;
+  const stalePriced = plan.picks.filter(p => p.item.priceStale).length;
   const StatusIcon = summary.level === 'ok' ? CheckCircle2 : summary.level === 'warn' ? AlertTriangle : XCircle;
 
   return (
@@ -94,6 +118,10 @@ function FeasibleCard({ plan, budgetCents, scenarios, onChoose }: { plan: PlanRe
       </ul>
 
       <p className={`nx-compat ${summary.level}`}><StatusIcon size={16} /> {summary.text}</p>
+      {(userPriced > 0 || stalePriced > 0) && <p className="nx-plan-budget" title="价格来源：我的价格来自“价格管理”里的记录，其余为中关村参考价或估算（非实时）">
+        {userPriced > 0 && `${userPriced} 件用我的价格`}{userPriced > 0 && stalePriced > 0 && ' · '}{stalePriced > 0 && <span className="nx-stale">{stalePriced} 件价格超过有效期</span>}
+      </p>}
+      {plan.score && <ScoreBlock score={plan.score} office={scenarios.includes('office')} />}
 
       {plan.peripherals && plan.peripherals.picks.length > 0 && (
         <div className="nx-plan-peripherals" title={plan.peripherals.picks.map(p => `${p.item.name}：${p.reason}`).join('\n')}>

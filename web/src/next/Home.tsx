@@ -1,6 +1,6 @@
-import { FileClock, Gamepad2, Loader2, MonitorPlay, ShieldCheck, Sparkles, VolumeX, Wallet } from 'lucide-react';
+import { FileClock, Gamepad2, Loader2, MonitorPlay, Recycle, ShieldCheck, Sparkles, Tags, VolumeX, Wallet } from 'lucide-react';
 import { useState } from 'react';
-import { api, type PlanResult } from '../api/client';
+import { api, type PlanResult, type PriceMode } from '../api/client';
 import { formatYuan } from '../domain/money';
 import { PURPOSES, purposeScenario, type Purpose } from '../domain/purposes';
 import type { Build } from '../domain/types';
@@ -18,6 +18,9 @@ export interface PlanGeneration {
   peripherals?: boolean;
   /** 严格预算：每档不得超过本档目标预算，放不下就说明无解 */
   strict?: boolean;
+  /** 价格模式：参考估算 / 优先我的价格；是否接受二手、翻新、拆机价 */
+  priceMode?: PriceMode;
+  allowUsed?: boolean;
   plans: PlanResult[];
 }
 
@@ -45,6 +48,8 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
   const [text, setText] = useState(String(budgetYuan));
   const [withPeripherals, setWithPeripherals] = useState(generation?.peripherals ?? false);
   const [strict, setStrict] = useState(generation?.strict ?? false);
+  const [priceMode, setPriceMode] = useState<PriceMode>(generation?.priceMode ?? 'estimate');
+  const [allowUsed, setAllowUsed] = useState(generation?.allowUsed ?? false);
 
   const textBudget = (value: string) => {
     const n = Math.round(Number(value.replace(/[^\d]/g, '')));
@@ -59,7 +64,8 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
 
   const scenarios = scenariosOf(purpose, quiet);
   const current = generation?.budgetCents === textBudget(text) * 100 && generation.scenarios.join(',') === scenarios.join(',')
-    && !!generation.peripherals === withPeripherals && !!generation.strict === strict ? generation : null;
+    && !!generation.peripherals === withPeripherals && !!generation.strict === strict
+    && (generation.priceMode ?? 'estimate') === priceMode && !!generation.allowUsed === (priceMode === 'manual' && allowUsed) ? generation : null;
   const fullPlans = current?.plans.filter(p => !p.infeasible && p.picks.length + Number(p.igpu) + Number(p.stockCooler) === 8) ?? [];
   const lowest = fullPlans.length ? Math.min(...fullPlans.map(p => p.totalCents)) : null;
 
@@ -68,8 +74,9 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
     setLoading(true);
     setError(null);
     try {
-      const plans = await api.plans({ budgetCents, scenarios, peripherals: withPeripherals ? ['MONITOR', 'KEYBOARD', 'MOUSE'] : [], maxOverPercent: strict ? 0 : null });
-      onPlans({ budgetCents, scenarios, peripherals: withPeripherals, strict, plans });
+      const used = priceMode === 'manual' && allowUsed;
+      const plans = await api.plans({ budgetCents, scenarios, peripherals: withPeripherals ? ['MONITOR', 'KEYBOARD', 'MOUSE'] : [], maxOverPercent: strict ? 0 : null, priceMode, allowUsed: used });
+      onPlans({ budgetCents, scenarios, peripherals: withPeripherals, strict, priceMode, allowUsed: used, plans });
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成方案失败');
     } finally {
@@ -112,6 +119,22 @@ export function Home({ budgetYuan, purpose, quiet, onBudget, onPurpose, onQuiet,
           <ShieldCheck size={18} aria-hidden /> 严格预算
           <input type="checkbox" role="switch" checked={strict} onChange={e => setStrict(e.target.checked)} />
         </label>
+        <div className="nx-ask-field nx-ask-price">
+          <Tags size={22} aria-hidden />
+          <label htmlFor="nx-price-mode" title="参考估算：用中关村参考价和估算价（非实时）。优先我的价格：配件有你在“价格管理”里录入的价格时用你的，没有的仍用参考估算。">
+            <span>价格模式</span>
+            <select id="nx-price-mode" value={priceMode} onChange={e => setPriceMode(e.target.value as PriceMode)}>
+              <option value="estimate">参考估算</option>
+              <option value="manual">优先我的价格</option>
+            </select>
+          </label>
+        </div>
+        {priceMode === 'manual' && (
+          <label className="nx-toggle nx-quiet" title="把你录入的二手、翻新、拆机价也纳入；默认只用全新和库存新品">
+            <Recycle size={18} aria-hidden /> 接受二手价
+            <input type="checkbox" role="switch" checked={allowUsed} onChange={e => setAllowUsed(e.target.checked)} />
+          </label>
+        )}
         <div className="nx-ask-actions">
           {draft && <button type="button" className="nx-btn nx-btn-outline" onClick={onResume} title={draft.name}><FileClock size={17} /> 继续草稿</button>}
           <button type="submit" className="nx-btn nx-btn-primary" disabled={loading}>

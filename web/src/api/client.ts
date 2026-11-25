@@ -110,7 +110,29 @@ export interface QuoteReport {
 }
 
 /** 估算依据，由准到粗：ZOL 参考价、同型号、同芯片中位价、同规格中位价、同类粗估、ZOL 系列起价 */
-export type EstimateBasis = 'reference' | 'model' | 'chip-median' | 'spec-median' | 'class-median' | 'series-low';
+export type EstimateBasis = 'reference' | 'model' | 'chip-median' | 'spec-median' | 'class-median' | 'series-low' | 'manual' | 'verified';
+
+/** 用户价格记录（与规格分开存放，见 /prices） */
+export type PriceCondition = 'new' | 'used' | 'refurbished' | 'old-stock' | 'oem';
+export interface PriceRecord {
+  id: string;
+  componentId: string;
+  sku: string | null;
+  priceCents: number;
+  currency: 'CNY';
+  sourceName: string;
+  sourceUrl: string | null;
+  observedAt: string;
+  condition: PriceCondition;
+  stockStatus: 'in_stock' | 'out_of_stock' | 'unknown';
+  shippingCents: number;
+  priceType: 'reference' | 'verified' | 'manual' | 'estimate';
+  confidence: 'high' | 'medium' | 'low';
+  note: string;
+}
+export type PriceRecordInput = Partial<Omit<PriceRecord, 'id'>> & { componentId: string; priceCents: number };
+/** estimate = 参考估算；manual = 优先我的价格 */
+export type PriceMode = 'estimate' | 'manual';
 
 export interface CatalogItem {
   id: string;
@@ -147,6 +169,13 @@ export interface CatalogItem {
   priceTrend?: PriceTrend;
   /** 性能参考：Blender 渲染跑分（CC0）与按评测整理的游戏指数 */
   performance?: Performance;
+  /** 价格可信度（来源数、价格区间宽度） */
+  priceConfidence?: 'high' | 'medium' | 'low';
+  /** 价格来自哪里：目录参考价 / 我的价格记录（“优先我的价格”模式） */
+  priceSource?: 'catalog' | 'user';
+  priceRecord?: PriceRecord;
+  /** 目录价超过 14 天、我的价格超过 30 天未更新 */
+  priceStale?: boolean;
 }
 
 export interface Performance {
@@ -206,9 +235,26 @@ export interface PlanResult extends RecommendResult {
   suggestions?: string[];
   /** 和哪一档配置相同（预算再加也选不出更值得的升级） */
   sameAs?: 'save' | 'balanced' | 'plus';
+  /** 整机综合评分（0–100）与分项（0–100），bottleneck 为 CPU 拖后腿扣分 */
+  score?: { total: number; bottleneck: number; parts: Partial<Record<ScorePart, number>>; version: string } | null;
   /** 请求了外设时：按这套方案的显卡和档位挑的显示器 / 键盘 / 鼠标（不占主机预算） */
   peripherals?: { picks: RecommendResult['picks']; totalCents: number };
 }
+
+export type ScorePart = 'gpu' | 'cpu' | 'memory' | 'storage' | 'quality' | 'noise' | 'trust';
+
+export interface PlanRequest {
+  budgetCents: number;
+  scenarios: string[];
+  peripherals?: ('MONITOR' | 'KEYBOARD' | 'MOUSE')[];
+  maxOverPercent?: number | null;
+  priceMode?: PriceMode;
+  allowUsed?: boolean;
+  /** 锁定的配件（硬约束），按服务端槽位名 */
+  locked?: Record<string, { priceCents: number; specs: object; name?: string; igpu?: boolean }>;
+}
+
+export interface PriceMeta { mode: PriceMode; allowUsed: boolean; userPriced: number }
 
 export interface Health {
   status: 'ok';
@@ -253,8 +299,19 @@ export const api = {
   updateBuild: (id: string, input: ApiBuildInput & { version: number }) => call<ApiBuild>(`/builds/${id}`, { method: 'PUT', body: input }),
   deleteBuild: (id: string, version: number) => call<void>(`/builds/${id}`, { method: 'DELETE', body: { version } }),
   jdPrices: (skuIds: string[]) => call<JdLookup>('/quotes/jd', { method: 'POST', body: { skuIds }, timeoutMs: 15000 }),
-  plans: (body: { budgetCents: number; scenarios: string[]; peripherals?: ('MONITOR' | 'KEYBOARD' | 'MOUSE')[]; maxOverPercent?: number | null }) =>
-    call<{ plans: PlanResult[] }>('/plans', { method: 'POST', body, timeoutMs: 30000 }).then(r => r.plans),
+  plans: (body: PlanRequest) =>
+    call<{ plans: PlanResult[]; priceMeta?: PriceMeta }>('/plans', { method: 'POST', body, timeoutMs: 30000 }).then(r => r.plans),
+  prices: (componentId?: string) => call<{ records: PriceRecord[] }>(`/prices${componentId ? `?componentId=${encodeURIComponent(componentId)}` : ''}`).then(r => r.records),
+  addPrice: (input: PriceRecordInput) => call<PriceRecord>('/prices', { method: 'POST', body: input }),
+  deletePrice: (id: string) => call<void>(`/prices/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  importPrices: (format: 'csv' | 'json', content: string) =>
+    call<{ imported: number; errors: { row: number; message: string }[] }>('/prices/import', { method: 'POST', body: { format, content }, timeoutMs: 30000 }),
+  exportPricesJson: () => call<{ version: number; exportedAt: string; records: PriceRecord[] }>('/prices/export'),
+  exportPricesCsv: async () => {
+    const res = await fetch(BASE + '/prices/export?format=csv', { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new ApiError(res.status, 'EXPORT_FAILED', '导出失败');
+    return res.text();
+  },
   recommend: (body: { budgetCents: number; scenarios: string[]; locked: Record<string, { priceCents: number; specs: object }> }) =>
     call<RecommendResult>('/recommend', { method: 'POST', body, timeoutMs: 20000 }),
   catalogItem: (id: string) => call<CatalogItem>(`/catalog/${encodeURIComponent(id)}`),
