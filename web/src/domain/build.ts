@@ -83,7 +83,7 @@ export interface BuildTotals {
   /** 主机合计（8 个配件 + 自定义项），与预算比较 */
   totalCents: number;
   remainingCents: number;
-  /** 外设（显示器、键盘、鼠标）单独计价，不占主机预算 */
+  /** 外设（显示器、键盘、鼠标）单独计价，计入整机总预算 */
   peripheralCents: number;
   peripheralCount: number;
   /** 主机 + 外设 */
@@ -131,7 +131,7 @@ export function totals(b: Build): BuildTotals {
     slotCount: SLOTS.length,
     missing,
     totalCents,
-    remainingCents: b.budgetCents - totalCents,
+    remainingCents: b.budgetCents - totalCents - peripheralCents,
     peripheralCents,
     peripheralCount,
     grandTotalCents: totalCents + peripheralCents,

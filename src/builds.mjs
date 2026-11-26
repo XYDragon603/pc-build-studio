@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { hardwareDetails } from './hardware-specs.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { ApiError, invalid } from './api-error.mjs';
 import { evaluateBuild, overallStatus } from './compat-rules.mjs';
@@ -77,6 +78,7 @@ function normalizePart(value) {
   const part = object(value, 'part');
   const inputSpecs = object(part.specs ?? {}, 'part.specs');
   const specs = {};
+  try { Object.assign(specs, hardwareDetails(inputSpecs)); } catch (error) { throw invalid(error.message); }
   // 板型（主板 formFactor、机箱 maxBoardFormFactor）与显卡供电口按大写保存
   for (const field of ['socket', 'memoryType', 'formFactor', 'maxBoardFormFactor', 'gpuPowerConnector']) {
     if (inputSpecs[field] != null) specs[field] = string(inputSpecs[field], 'part.specs.' + field, 32).toUpperCase();
@@ -129,7 +131,7 @@ function normalizePart(value) {
   }
   const priceSource = part.priceSource ?? 'manual';
   // estimate：按目录参考价估算，计入合计但界面单独标注
-  if (!['manual', 'demo', 'estimate'].includes(priceSource)) throw invalid('part.priceSource 必须为 manual、demo 或 estimate');
+  if (!['manual', 'demo', 'estimate', 'verified', 'historical'].includes(priceSource)) throw invalid('part.priceSource 必须为 manual、demo、estimate、verified 或 historical');
   const catalogId = part.catalogId == null || part.catalogId === '' ? null : string(part.catalogId, 'part.catalogId', 120);
   if (catalogId && !/^[a-z0-9-]+$/.test(catalogId)) throw invalid('part.catalogId 格式无效');
   return {
@@ -243,7 +245,7 @@ export function calculateBuild(build) {
   }
   return {
     ...build,
-    totals: { totalCents, peripheralCents, grandTotalCents: totalCents + peripheralCents, remainingCents: build.budgetCents - totalCents,
+    totals: { totalCents, peripheralCents, grandTotalCents: totalCents + peripheralCents, remainingCents: build.budgetCents - totalCents - peripheralCents,
       unknownPriceCount: parts.filter(part => part.priceCents === null).length,
       filledStandardSlots: slotTypes.filter(type => lookup[type.id]).length },
     compatibility: {

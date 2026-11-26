@@ -3,6 +3,9 @@
 // 原则：只解析写得明确的值；解析不出来就不写（交给兼容性规则判定为 UNKNOWN），不按型号名或价格推断。
 // 例如“金河田智能芯680 GT版”的额定功率取“额定功率 = 500W”，不从名字里的 680 推断。
 
+import { boardFormat, boardFormats, BOARD_FORMATS } from './hardware-specs.mjs';
+import { boardPlatform, cpuPlatform, gpuPlatform } from './platform-data.mjs';
+
 const count = value => {
   const m = String(value ?? '').match(/(\d+)\s*个/);
   return m ? Number(m[1]) : undefined;
@@ -60,23 +63,55 @@ function psu12v(raw) {
 export const chipsetOf = text => String(text ?? '').toUpperCase().match(/\b([ABHQXZ]\d{3}E?)\b/)?.[1];
 
 /** 按类目补字段；返回新的 specs（不修改传入对象） */
+/** 平台规格表补缺（只填缺失字段，不覆盖 ZOL 参数或人工修正）；目录里没有 rawParams 的条目（BuildCores）同样适用 */
+function withPlatform(item, s) {
+  const fill = obj => { for (const [k, v] of Object.entries(obj)) if (s[k] === undefined) s[k] = v; };
+  if (item.category === 'CPU') fill(cpuPlatform(item.name, s));
+  if (item.category === 'GPU') fill(gpuPlatform(s.chipset));
+  if (item.category === 'MOTHERBOARD') fill(boardPlatform(s));
+  return s;
+}
+
 export function enrichSpecs(item) {
   const raw = item.rawParams;
   const s = { ...(item.specs ?? {}) };
   const keep = (field, value) => { if (value !== undefined && value !== null && s[field] === undefined) s[field] = value; };
-  if (!raw) return s;
+  // Dedicated supported-board list wins over case exterior/type labels.
+  if (item.category === 'CASE') {
+    const formats = boardFormats(s.supportedBoardFormats ?? raw?.['适用主板'] ?? s.supportedBoards);
+    if (formats.length) {
+      s.supportedBoardFormats = formats;
+      s.maxBoardFormFactor = BOARD_FORMATS.filter(f => formats.includes(f)).at(-1);
+    }
+  }
+  if (item.category === 'MOTHERBOARD') {
+    const rawFormat = boardFormats(raw?.['主板板型']);
+    s.formFactor = rawFormat.length === 1 ? rawFormat[0] : boardFormat(s.formFactor) ?? undefined;
+    s.chipset = chipsetOf(raw?.['主芯片组'] ?? s.chipset) ?? s.chipset;
+  }
+  if (!raw) return withPlatform(item, s);
 
   switch (item.category) {
     case 'GPU': {
       const power = parseGpuPower(raw['电源接口']);
       if (power) keep('powerPins', power);
       for (const [k, v] of Object.entries(parseGpuSize(raw['产品尺寸']))) keep(k, v);
-      const slots = firstNumber(raw['插槽']);
+      const slots = firstNumber(String(raw['插槽'] ?? '').replace(/[，,](?=\d\s*(?:槽|slot))/i, '.'));
       if (slots && slots <= 5) keep('slotWidth', slots);
       // 整卡最大功耗（厂商标注），比同芯片 TDP 中位数更准
       const watts = firstNumber(raw['最大功耗']);
       if (watts && watts >= 20 && watts <= 800) keep('boardPowerWatts', watts);
       if (/Arc/i.test(raw['显卡芯片'] ?? s.chipset ?? '')) keep('needsResizableBar', true);
+      const bus = String(raw['接口类型'] ?? raw['总线接口'] ?? s.busInterface ?? '');
+      const generation = bus.match(/PCI(?:[ -]?E| Express)\s*(?:Gen\s*)?([1-7])(?:\.0)?/i);
+      if (generation) keep('pcieGeneration', Number(generation[1]));
+      const electrical = String(raw['电气通道'] ?? '').match(/(?:[x×]\s*)?(1|2|4|8|16)(?!\d)/i);
+      if (generation && electrical) keep('pcieLink', { gen: Number(generation[1]), lanes: Number(electrical[1]) });
+      // GPU silicon link limit, verified in ASRock's RX 6500 XT specification:
+      // https://www.asrock.com/Graphics-Card/AMD/Radeon%20RX%206500%20XT%20Phantom%20Gaming%20D%204GB%20OC/index.asp
+      if (/\bRX\s*6500\s*XT\b/i.test(s.chipset ?? '')) {
+        s.pcieLink = { gen: 4, lanes: 4 };
+      }
       break;
     }
     case 'PSU': {
@@ -91,6 +126,13 @@ export function enrichSpecs(item) {
       keep('warrantyYears', firstNumber(raw['质保时间']));
       // 原始字段明确写了 16pin 接口数量时，以它为准（原来的全文匹配可能误判）
       if (s.pin16Count !== undefined) s.native16Pin = s.pin16Count > 0;
+      const dims = String(raw['电源尺寸'] ?? raw['产品尺寸'] ?? '').match(/\d+(?:\.\d+)?/g)?.map(Number);
+      if (dims?.length === 3 && dims.includes(150) && dims.includes(86)) {
+        keep('psuFormFactor', 'ATX');
+        keep('psuLengthMm', dims.find(n => n !== 150 && n !== 86) ?? 150);
+      }
+      const shape = String(raw['电源规格'] ?? s.formFactor ?? '').trim().toUpperCase();
+      if (['ATX', 'SFX', 'SFX-L', 'TFX', 'FLEX ATX'].includes(shape)) keep('psuFormFactor', shape);
       break;
     }
     case 'MOTHERBOARD': {
@@ -101,9 +143,32 @@ export function enrichSpecs(item) {
       if (pcie?.length) keep('pcieGen', Math.max(...pcie));
       const m2 = String(raw['存储接口'] ?? '').match(/(\d+)\s*×\s*M\.2/i);
       if (m2) keep('m2Slots', Number(m2[1]));
-      else if (/SATA/.test(raw['存储接口'] ?? '')) keep('m2Slots', 0);
+      else if (/SATA/i.test(raw['存储接口'] ?? '') && !/M[.．]2|NVME/i.test(raw['存储接口'])) keep('m2Slots', 0);
       const phases = String(raw['供电模式'] ?? '').match(/\d+/g)?.map(Number);
       if (phases?.length) keep('vrmPhases', phases[0]);
+      break;
+    }
+    case 'CPU': {
+      keep('basePowerWatts', firstNumber(raw['热设计功耗(TDP)'] ?? raw['TDP']));
+      const link = String(raw['PCI Express版本'] ?? raw['PCIe版本'] ?? '');
+      const gen = link.match(/([345])\.0/);
+      // Lane count cannot be obtained from a version number alone.
+      const lanes = firstNumber(raw['显卡PCI Express通道数']);
+      // CPU total PCIe lane count includes NVMe/chipset; do not call it the
+      // GPU-controller width. A plain version alone is insufficient.
+      if (gen && [1, 2, 4, 8, 16].includes(lanes)) keep('pcieLink', { gen: Number(gen[1]), lanes });
+      break;
+    }
+    case 'CASE': {
+      keep('expansionSlots', firstNumber(raw['扩展插槽']));
+      const psuType = String(raw['电源类型'] ?? '').match(/\b(SFX-L|SFX|ATX)\b/i)?.[1];
+      if (psuType) keep('supportedPsuFormats', [psuType.toUpperCase()]);
+      const intake = String(raw['前置风扇位'] ?? '');
+      const exhaust = String(raw['后置风扇位'] ?? '');
+      if (intake) keep('intakePositions', ['front']);
+      if (exhaust) keep('exhaustPositions', ['rear']);
+      keep('includedFans', firstNumber(raw['预装风扇']));
+      // Installation positions do not prove preinstalled fans or mesh intake.
       break;
     }
     case 'SSD': {
@@ -115,9 +180,12 @@ export function enrichSpecs(item) {
       else if (/\d+\s*(MB|GB)/i.test(cache)) keep('dram', 'dram');
       const tbw = String(raw['其它性能'] ?? '').match(/(\d+)\s*TBW|TBW[：:]\s*(\d+)/i);
       if (tbw) keep('tbw', Number(tbw[1] ?? tbw[2]));
+      const gen = String(s.interface ?? '').match(/PCI(?:[ -]?E| Express)?\s*(\d)(?:\.\d)?/i);
+      const lanes = String(s.interface ?? '').match(/[x×]\s*(\d+)/i);
+      if (gen && lanes) keep('pcieLink', { gen: Number(gen[1]), lanes: Number(lanes[1]) });
       break;
     }
     default:
   }
-  return s;
+  return withPlatform(item, s);
 }

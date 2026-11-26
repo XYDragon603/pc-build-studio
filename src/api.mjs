@@ -8,7 +8,11 @@ import { LocalStore } from './store.mjs';
 import { createCatalog } from './catalog.mjs';
 import { PERIPHERAL_SLOTS, recommendPeripherals } from './peripherals.mjs';
 import { JdUnion } from './jdunion.mjs';
-import { recommend, recommendPlans, SLOTS as RECOMMEND_SLOTS } from './recommend.mjs';
+import { recommendPlansWithMeta, SLOTS as RECOMMEND_SLOTS } from './recommend.mjs';
+import { normalizeSpecOverride } from './catalog-corrections.mjs';
+import { validateWorkload } from './workloads.mjs';
+import { STRATEGIES } from './recommendation-strategy.mjs';
+import { dataQualityReport } from './data-quality.mjs';
 import { applyPriceMode, parseCsv, PriceStore, toCsv } from './prices.mjs';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
@@ -109,7 +113,7 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
   provider = new BraveSearch(), inspect, jdUnion = new JdUnion({ directory }), onError = console.error } = {}) {
   const store = new LocalStore(directory);
   const builds = new BuildRepository(store);
-  const catalog = createCatalog(catalogDirectory);
+  let catalog = createCatalog(catalogDirectory);
   const prices = new PriceStore(store);
   let knownIds = null;
   const catalogIds = () => (knownIds ??= new Set(catalog.all().map(item => item.id)));
@@ -134,6 +138,42 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
       const method = request.method;
       const singleBuild = buildPath.exec(pathname);
       const singleProduct = catalogPath.exec(pathname);
+      const specProduct = /^\/api\/v1\/catalog\/([a-z0-9-]{1,120})\/specs$/.exec(pathname);
+      if (specProduct && (method === 'PUT' || method === 'DELETE')) {
+        catalog.get(specProduct[1]);
+        let record;
+        if (method === 'PUT') {
+          try { record = normalizeSpecOverride(await readJson(request)); } catch (error) { throw invalid(error.message); }
+        }
+        const updatedOverrides = await store.withLock('spec-overrides.lock', async () => {
+          const current = await store.read('spec-overrides.json', { overrides: {} });
+          const id = specProduct[1];
+          current.history ??= {};
+          const history = current.history[id] ?? [];
+          const previous = current.overrides[id];
+          if (record) {
+            current.history[id] = [...history, previous ?? null].slice(-12);
+            const fieldSources = previous?.fieldSources ?? Object.fromEntries(Object.keys(previous?.specs ?? {})
+              .map(field => [field, { sourceUrl: previous.sourceUrl, updatedAt: previous.updatedAt }]));
+            for (const field of Object.keys(record.specs)) fieldSources[field] = { sourceUrl: record.sourceUrl, updatedAt: record.updatedAt };
+            current.overrides[id] = { ...record, specs: { ...previous?.specs, ...record.specs }, fieldSources };
+          } else {
+            if (!previous && !history.length) throw new ApiError(404, 'NO_SPEC_OVERRIDE', '没有可回滚的规格修正');
+            const prior = history.pop();
+            current.history[id] = history;
+            if (prior) current.overrides[id] = prior;
+            else delete current.overrides[id];
+          }
+          await store.write('spec-overrides.json', current);
+          return current.overrides;
+        });
+        catalog = createCatalog(catalogDirectory, updatedOverrides);
+        return json(response, 200, catalog.get(specProduct[1]));
+      }
+      if (pathname === '/api/v1/catalog/quality-report' && method === 'GET') return json(response, 200, dataQualityReport(applyPriceMode(catalog.all(), await prices.list(), { mode: 'manual' })));
+      if (pathname === '/api/v1/performance/scenarios' && method === 'GET') {
+        return json(response, 200, { cohorts: catalog.performanceSources.scenarioCohorts });
+      }
 
       if (method === 'OPTIONS' && pathname.startsWith('/api/v1/')) {
         response.writeHead(204, { 'Access-Control-Allow-Methods': methods, 'Access-Control-Allow-Headers': 'Content-Type',
@@ -222,22 +262,23 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         return;
       }
       if (pathname === '/api/v1/plans' && method === 'POST') {
-        const { budgetCents, scenarios = [], peripherals = [], maxOverPercent = null, locked = {}, priceMode, allowUsed } = await readJson(request);
+        const { budgetCents, scenarios = [], peripherals = [], maxOverPercent = null, locked = {}, priceMode, allowUsed, allowModified = false, strategy = 'balanced', workload: workloadInput = {} } = await readJson(request);
+        if (typeof allowModified !== 'boolean') throw invalid('allowModified 必须为布尔值');
+        if (!STRATEGIES.includes(strategy)) throw invalid('strategy 只能是 value、balanced 或 performance');
         const options = priceOptions({ priceMode, allowUsed });
         if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
         if (!Array.isArray(scenarios) || scenarios.length > 8 || !scenarios.every(s => typeof s === 'string' && s.length <= 32)) throw invalid('scenarios 格式无效');
         if (!Array.isArray(peripherals) || !peripherals.every(slot => PERIPHERAL_SLOTS.includes(slot))) throw invalid('peripherals 只能包含 MONITOR、KEYBOARD、MOUSE');
         // null = 不限；0 = 严格预算；1–50 = 允许超出的百分比
         if (maxOverPercent !== null && (!Number.isInteger(maxOverPercent) || maxOverPercent < 0 || maxOverPercent > 50)) throw invalid('maxOverPercent 需为 0–50 的整数或 null');
-        const items = await planItems(options);
-        const plans = recommendPlans(items, { budgetCents, scenarios, maxOverPercent, locked: parseLocked(locked) });
+        const pricedCatalog = applyPriceMode(catalog.all(), options.mode === 'manual' ? await prices.list() : [], options);
+        const items = pricedCatalog.filter(forPlans);
+        let workload;
+        try { workload = validateWorkload(workloadInput, scenarios.find(s => s !== 'quiet') ?? 'office'); } catch (error) { throw invalid(error.message); }
+        const { plans, meta } = recommendPlansWithMeta(items, { budgetCents, scenarios, maxOverPercent, locked: parseLocked(locked), workload, peripherals, strategy, allowUsed: options.allowUsed, allowModified });
+        meta.catalogFilter = { initialCount: pricedCatalog.length, eligibleCount: items.length, reasons: { globalMarket: pricedCatalog.filter(i => i.market !== 'cn').length, suspectPrice: pricedCatalog.filter(i => i.possiblyStale).length, workstation: pricedCatalog.filter(i => i.workstation).length, broadEstimate: pricedCatalog.filter(i => ['class-median', 'series-low'].includes(i.estimateBasis)).length }, excluded: pricedCatalog.filter(i => ['CPU', 'GPU'].includes(i.category) && i.market === 'cn' && !forPlans(i)).map(i => ({ id: i.id, name: i.name, priceCents: i.estimatedPriceCents ?? null, priceSource: i.sourceUrl, reason: i.possiblyStale ? 'suspect-price' : i.workstation ? 'workstation' : 'broad-estimate' })) };
         const priceMeta = { mode: options.mode, allowUsed: options.allowUsed, userPriced: items.filter(item => item.priceSource === 'user').length };
-        if (!peripherals.length) return json(response, 200, { plans, priceMeta });
-        // 外设不占主机预算：每套方案按自己的显卡和档位单独挑
-        return json(response, 200, { plans: plans.map(plan => (plan.infeasible ? plan : { ...plan, peripherals: recommendPeripherals(items, {
-          scenarios, tier: plan.id, igpu: plan.igpu, slots: peripherals,
-          gpuIndex: plan.picks.find(pick => pick.slot === 'GPU')?.item.performance?.gaming?.index ?? null,
-        }) })), priceMeta });
+        return json(response, 200, { plans, priceMeta, meta });
       }
       // data/images/ 下的本地商品图（data/part-images.json 引用）
       const imageMatch = /^\/api\/v1\/images\/([\w.-]+\.(?:jpe?g|png|webp|gif))$/i.exec(pathname);
@@ -259,7 +300,8 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         const { budgetCents, scenarios = [], locked = {} } = await readJson(request);
         if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
         if (!Array.isArray(scenarios) || scenarios.length > 8 || !scenarios.every(s => typeof s === 'string' && s.length <= 32)) throw invalid('scenarios 格式无效');
-        return json(response, 200, recommend(catalog.all().filter(forPlans), { budgetCents, scenarios, locked: parseLocked(locked) }));
+        const result = recommendPlansWithMeta(await planItems({ mode: 'manual' }), { budgetCents, scenarios, locked: parseLocked(locked), tierRatios: { balanced: 1 } });
+        return json(response, 200, { ...result.plans[0], searchMeta: result.meta });
       }
       if (pathname === '/api/v1/quotes/jd' && method === 'POST') {
         const { skuIds } = await readJson(request);

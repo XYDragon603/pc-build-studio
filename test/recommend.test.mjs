@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { recommend, shares } from '../src/recommend.mjs';
 
 let n = 0;
-const item = (category, cents, specs) => ({ id: `t-${++n}`, category, name: `${category}-${cents / 100}`, estimatedPriceCents: cents, specs });
+const item = (category, cents, specs) => ({ id: `t-${++n}`, category, name: `${category}-${cents / 100}`, estimatedPriceCents: cents, specs, productStatus: 'new' });
 
 const catalog = [
   item('CPU', 100000, { socket: 'AM5', maxPowerWatts: 88 }),

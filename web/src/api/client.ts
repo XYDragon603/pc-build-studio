@@ -22,7 +22,7 @@ export interface ApiPart {
   spec?: string;
   priceCents: number | null;
   quantity: number;
-  priceSource: 'manual' | 'demo' | 'estimate';
+  priceSource: 'manual' | 'demo' | 'estimate' | 'verified' | 'historical';
   note: string;
   url: string | null;
   specs: ApiSpecs;
@@ -123,6 +123,8 @@ export interface PriceRecord {
   sourceName: string;
   sourceUrl: string | null;
   observedAt: string;
+  quotedAt?: string | null;
+  recordedAt?: string;
   condition: PriceCondition;
   stockStatus: 'in_stock' | 'out_of_stock' | 'unknown';
   shippingCents: number;
@@ -142,7 +144,7 @@ export interface CatalogItem {
   mpn: string | null;
   summary: string;
   aliases: string[];
-  specs: Record<string, string | number | boolean | string[] | undefined>;
+  specs: Record<string, unknown>;
   imageUrl: string | null;
   sourceUrl: string;
   dataSource?: 'buildcores' | 'zol';
@@ -176,6 +178,9 @@ export interface CatalogItem {
   priceRecord?: PriceRecord;
   /** 目录价超过 14 天、我的价格超过 30 天未更新 */
   priceStale?: boolean;
+  /** 商品状态：new / used / refurbished / modified / engineering_sample / unknown，及判定依据 */
+  productStatus?: 'new' | 'used' | 'refurbished' | 'modified' | 'engineering_sample' | 'unknown';
+  productStatusReason?: string;
 }
 
 export interface Performance {
@@ -217,6 +222,14 @@ export interface RecommendResult {
 
 /** POST /plans 返回的一套方案（省钱版 / 推荐版 / 进阶版） */
 export interface PlanResult extends RecommendResult {
+  corePerformance?: { metric: number | null; vram: number; proxy: string | null; benchmark?: { id: string; title?: string; unit: string; value: number; game?: string; sourceUrl: string } };
+  unmetRequirements?: string[];
+  assessment?: { budget: 'met' | 'over'; requirements: 'met' | 'unmet' | 'unverified'; physical: string; safety: string; confidence: string; needsConfirmation: boolean; blockingChecks: string[] };
+  upgrades?: (Pick<PlanResult, 'id' | 'label' | 'targetCents' | 'igpu' | 'stockCooler' | 'additionalCosts' | 'peripherals' | 'compatibility' | 'totalCents' | 'picks'> & { reason: string; extraCents: number })[];
+  recommendationStatus?: 'feasible' | 'conditional' | 'verification_required' | 'degraded' | 'over_budget_alternative' | 'infeasible';
+  formalRecommendation?: boolean;
+  hostTotalCents?: number;
+  additionalCosts?: { id: string; name: string; priceCents: number }[];
   id: 'save' | 'balanced' | 'plus';
   label: string;
   targetCents: number;
@@ -236,20 +249,25 @@ export interface PlanResult extends RecommendResult {
   /** 和哪一档配置相同（预算再加也选不出更值得的升级） */
   sameAs?: 'save' | 'balanced' | 'plus';
   /** 整机综合评分（0–100）与分项（0–100），bottleneck 为 CPU 拖后腿扣分 */
-  score?: { total: number; bottleneck: number; parts: Partial<Record<ScorePart, number>>; version: string } | null;
-  /** 请求了外设时：按这套方案的显卡和档位挑的显示器 / 键盘 / 鼠标（不占主机预算） */
+  score?: { total: number; bottleneck: number; parts: Partial<Record<ScorePart, number>>; version: string; performanceBasis?: string; confidence?: string; scope?: string; dimensions?: Record<string, number> } | null;
+  /** 请求了外设时：按这套方案的显卡和档位挑的显示器 / 键盘 / 鼠标（计入整机总预算） */
   peripherals?: { picks: RecommendResult['picks']; totalCents: number };
 }
 
-export type ScorePart = 'gpu' | 'cpu' | 'memory' | 'storage' | 'quality' | 'noise' | 'trust';
+export type ScorePart = 'gpu' | 'cpu' | 'memory' | 'storage' | 'quality' | 'noise' | 'trust' | 'balance' | 'upgrade';
 
+export type RecommendationStrategy = 'value' | 'balanced' | 'performance';
 export interface PlanRequest {
+  strategy?: RecommendationStrategy;
+  workload?: { task?: string; game?: string; targetFps?: number; quality?: string; material?: string; ambientC?: number; cpuPowerLimitWatts?: number; minVramGB?: number; minSsdGB?: number; model?: string; benchmarkId?: string };
   budgetCents: number;
   scenarios: string[];
   peripherals?: ('MONITOR' | 'KEYBOARD' | 'MOUSE')[];
   maxOverPercent?: number | null;
   priceMode?: PriceMode;
   allowUsed?: boolean;
+  /** 允许非原厂改装 / 工程样品显卡等参与推荐（默认否；保修、稳定性、功耗与规格需另行核实） */
+  allowModified?: boolean;
   /** 锁定的配件（硬约束），按服务端槽位名 */
   locked?: Record<string, { priceCents: number; specs: object; name?: string; igpu?: boolean }>;
 }
@@ -287,6 +305,9 @@ async function call<T>(path: string, init: { method?: string; body?: unknown; ti
 }
 
 export const api = {
+  scenarioBenchmarks: () => call<{ cohorts: { id: string; task: string; title?: string; game?: string; quality?: string; model?: string; resolution?: string }[] }>('/performance/scenarios').then(r => r.cohorts),
+  qualityReport: () => call<{ generatedAt: string; itemCount: number; issueCount: number; counts: Record<string, number>; issues: unknown[] }>('/catalog/quality-report'),
+  correctSpecs: (id: string, input: { specs: object; sourceUrl: string; note?: string }) => call<CatalogItem>(`/catalog/${id}/specs`, { method: 'PUT', body: input }),
   health: () => call<Health>('/health', { timeoutMs: 4000 }),
   template: () => call<ApiTemplate>('/templates/demo'),
   listBuilds: () => call<{ items: ApiBuildSummary[] }>('/builds').then(r => r.items),

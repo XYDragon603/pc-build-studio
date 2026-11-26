@@ -240,7 +240,8 @@ export function boardFormFactor(value) {
 
 function caseSpecs(p) {
   return {
-    maxBoardFormFactor: boardFormFactor(p['机箱结构']),
+    // Explicit board support, not the case's exterior/type field.
+    maxBoardFormFactor: boardFormFactor(p['适用主板']),
     supportedBoards: p['适用主板'] || undefined,
     maxGpuLengthMm: minWithin(p['显卡限长'], 100, 600),
     maxCoolerHeightMm: minWithin(p['CPU散热器限高'] ?? p['散热器限高'], 30, 250),
@@ -507,6 +508,7 @@ function toRecord(listing, parsed, cat = category) {
     referencePriceCents: listing.referencePriceCents,
     ...(listing.priceRangeCents ? { priceRangeCents: listing.priceRangeCents } : {}),
     priceObservedAt: listing.referencePriceCents ? listing.fetchedAt : null,
+    catalogImportedAt: new Date().toISOString(),
     dataSource: 'zol',
     rawParams: params,
   };

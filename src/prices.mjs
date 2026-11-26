@@ -49,7 +49,11 @@ export function normalizeRecord(input, now = new Date()) {
   // 已核实商城报价必须带来源链接，才能复核
   if (priceType === 'verified' && !sourceUrl) throw invalid('已核实报价需要填写来源链接');
   const observedAt = input.observedAt ? new Date(input.observedAt) : now;
-  if (Number.isNaN(observedAt.getTime()) || observedAt.getTime() > now.getTime() + DAY) throw invalid('observedAt 时间无效');
+  if (Number.isNaN(observedAt.getTime()) || observedAt > now) throw invalid('价格观察时间无效或晚于当前时间');
+  const quotedAt = input.quotedAt ? new Date(input.quotedAt) : null;
+  if (quotedAt && (priceType !== 'verified' || Number.isNaN(quotedAt.getTime()) || quotedAt > observedAt)) {
+    throw invalid('实际报价时间仅用于已核实报价，且须早于或等于观察时间');
+  }
   const shippingCents = input.shippingCents == null || input.shippingCents === '' ? 0 : Number(input.shippingCents);
   if (!Number.isSafeInteger(shippingCents) || shippingCents < 0 || shippingCents > 1000000) throw invalid('shippingCents 无效');
   const confidence = input.confidence ?? (priceType === 'verified' ? 'high' : priceType === 'manual' ? 'medium' : 'low');
@@ -57,7 +61,9 @@ export function normalizeRecord(input, now = new Date()) {
   return {
     id: typeof input.id === 'string' && /^[a-z0-9-]{8,64}$/.test(input.id) ? input.id : randomUUID(),
     componentId, sku: input.sku ? String(input.sku).slice(0, 80) : null, priceCents, currency, sourceName, sourceUrl,
-    observedAt: observedAt.toISOString(), condition, stockStatus, shippingCents, priceType, confidence,
+    observedAt: observedAt.toISOString(), recordedAt: now.toISOString(),
+    quotedAt: quotedAt?.toISOString() ?? null,
+    condition, stockStatus, shippingCents, priceType, confidence,
     note: input.note ? String(input.note).slice(0, 200) : '',
   };
 }
@@ -107,7 +113,7 @@ export class PriceStore {
 
 // ---------- CSV ----------
 
-export const CSV_COLUMNS = ['componentId', 'priceCents', 'currency', 'sourceName', 'sourceUrl', 'observedAt', 'condition', 'stockStatus', 'shippingCents', 'priceType', 'confidence', 'sku', 'note'];
+export const CSV_COLUMNS = ['componentId', 'priceCents', 'currency', 'sourceName', 'sourceUrl', 'observedAt', 'condition', 'stockStatus', 'shippingCents', 'priceType', 'confidence', 'sku', 'note', 'quotedAt'];
 
 const csvCell = v => {
   const s = v == null ? '' : String(v);

@@ -60,12 +60,13 @@ test('BIOS：按 CPU 代际与芯片组判断', () => {
   assert.equal(biosSupport('龙芯3A6000', 'B650').status, UNKNOWN);
 });
 
-test('整机：全部数据明确时只剩条件项（XMP），扣具按等价插槽判断', () => {
+test('整机：旧快照缺少持续散热与空间数据，必须待核实；扣具按等价插槽判断', () => {
   const checks = evaluateBuild(base());
   assert.equal(byId(checks, 'coolerSocket').status, PASS);
-  assert.equal(byId(checks, 'memorySpeed').status, CONDITIONAL);
+  assert.equal(byId(checks, 'memorySpeed').status, UNKNOWN);
+  assert.equal(byId(checks, 'memorySpeed').blocking, false);
   assert.equal(byId(checks, 'gpuPower').status, PASS);
-  assert.equal(overallStatus(checks), CONDITIONAL);
+  assert.equal(overallStatus(checks), UNKNOWN);
   assert.ok(!checks.some(c => c.status === FAIL));
 });
 
@@ -100,6 +101,9 @@ test('多路 12V：显卡超过单路能力为 FAIL；Arc 需要 ReBAR；x8 显�
   const arc = base();
   arc.GPU = part('Arc B580', { chipset: 'Arc B580', needsResizableBar: true, powerPins: { pin6: 0, pin8: 1, pin16: 0 }, boardPowerWatts: 190, lengthMm: 270 });
   arc.MOTHERBOARD.specs.pcieGen = 3;
+  arc.CPU.specs.pcieLink = { gen: 4, lanes: 16 };
+  arc.GPU.specs.pcieLink = { gen: 4, lanes: 8 };
+  arc.MOTHERBOARD.specs.gpuPcieLink = { gen: 3, lanes: 16, physicalLanes: 16 };
   const checks = evaluateBuild(arc);
   assert.equal(byId(checks, 'rebar').status, CONDITIONAL);
   assert.equal(byId(checks, 'pcie').status, CONDITIONAL);

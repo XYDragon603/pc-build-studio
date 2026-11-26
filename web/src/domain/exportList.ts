@@ -6,7 +6,7 @@ import { PERIPHERALS, SLOTS } from './slots';
 import type { Build } from './types';
 
 const STATUS_MARK: Record<string, string> = { PASS: '✓', CONDITIONAL: '!', UNKNOWN: '?', FAIL: '✗', NOT_APPLICABLE: '–' };
-const SOURCE_TEXT: Record<string, string> = { estimate: '参考价估算（非实时）', manual: '实付 / 手填', demo: '演示价' };
+const SOURCE_TEXT: Record<string, string> = { estimate: '参考价估算（非实时）', manual: '实付 / 手填', demo: '演示价', verified: '已核实市场报价', historical: '历史报价' };
 
 const price = (c: number | null, estimate = false) =>
   c == null ? '价格未知' : c === 0 ? '已有（¥0）' : estimate ? `约 ${formatYuan(c)}（估算）` : formatYuan(c);
@@ -38,8 +38,8 @@ export function buildMarkdown(b: Build, demo: boolean): string {
       return part ? [`| ${label}（外设） | ${part.name} | ${part.spec || '—'} | ${price(part.priceCents, part.priceSource === 'estimate')} | ${SOURCE_TEXT[part.priceSource] ?? '—'} | ${b.slots[id].locked ? '是' : ''} |`] : [];
     }),
     '',
-    `**已选合计 ${formatYuan(t.totalCents)}** · ${t.remainingCents >= 0 ? `剩余预算 ${formatYuan(t.remainingCents)}` : `超出预算 ${formatYuan(-t.remainingCents)}`}`,
-    t.peripheralCount ? `外设 ${formatYuan(t.peripheralCents)}（不占主机预算）· 主机 + 外设合计 **${formatYuan(t.grandTotalCents)}**` : '',
+    `**已选合计 ${formatYuan(t.grandTotalCents)}** · ${t.remainingCents >= 0 ? `剩余预算 ${formatYuan(t.remainingCents)}` : `超出预算 ${formatYuan(-t.remainingCents)}`}`,
+    t.peripheralCount ? `外设 ${formatYuan(t.peripheralCents)}（计入整机总预算）· 主机 + 外设合计 **${formatYuan(t.grandTotalCents)}**` : '',
     t.missing.length ? `尚未选择：${t.missing.map(id => SLOTS.find(s => s.id === id)!.label).join('、')}` : '',
     t.unknownPriceCount ? `${t.unknownPriceCount} 项价格未知，未计入合计。` : '',
     t.estimateCount ? `${t.estimateCount} 项为参考价估算，实际价格以下单为准。` : '',

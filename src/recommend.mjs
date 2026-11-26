@@ -487,9 +487,9 @@ const TIER_LABELS = { save: '省钱版', balanced: '推荐版', plus: '进阶版
  * - locked：锁定的配件（硬约束，与 recommend 相同）；锁定配件之间确认不兼容时报告无解
  * ¥3,500 以下或“办公”用途时，省钱版为核显方案；办公用途三套都不配独显。
  */
-export function recommendPlans(items, { budgetCents, scenarios = [], maxOverPercent = null, tierRatios = TIER_RATIOS, locked = {} }) {
+export function recommendPlans(items, { budgetCents, scenarios = [], maxOverPercent = null, tierRatios = TIER_RATIOS, locked = {}, workload = {}, peripherals = [] }) {
   // V2：整机组合优化（src/optimizer.mjs）。原来的逐件分配算法保留在 recommend() 里，供 /recommend 接口使用
-  return optimizePlans(items, { budgetCents, scenarios, maxOverPercent, tierRatios, locked }).plans;
+  return optimizePlans(items, { budgetCents, scenarios, maxOverPercent, tierRatios, locked, workload, peripherals }).plans;
 }
 
 /** 同上，另附搜索统计与耗时（候选数、组合数、被兼容性规则排除的组合数） */

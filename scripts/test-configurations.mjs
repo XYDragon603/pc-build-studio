@@ -17,7 +17,7 @@ const cases = [
   [6000, 'creator', '视频剪辑 设计'], [10000, 'creator', '视频剪辑 设计'],
   [8000, 'ai', 'AI 机器学习'], [20000, 'ai', 'AI 机器学习'], [30000, 'ai', 'AI 机器学习'],
 ];
-const output = resolve('配置');
+const output = resolve(process.env.CONFIG_OUTPUT ?? '配置');
 await mkdir(output, { recursive: true });
 // Reuse the actual UI conversion (including conservative size/power rounding).
 const requireWeb = createRequire(new URL('../web/package.json', import.meta.url));
@@ -61,15 +61,18 @@ try {
       const byStatus = status => planChecks.filter(c => c.status === status).map(c => c.label);
       const conflicts = byStatus('FAIL'), conditional = byStatus('CONDITIONAL'), unknowns = byStatus('UNKNOWN');
       const savedOverall = build.compatibility.overall ?? null;
+      assert.ok(!planChecks.some(c => c.status === 'FAIL'));
+      if (!plan.infeasible) assert.ok(!build.compatibility.checks.some(c => c.status === 'FAIL'));
       const cpu = plan.picks.find(p => p.slot === 'CPU')?.item;
       if (plan.igpu && cpu && !hasIntegratedGraphics(cpu)) conflicts.push('核显方案 CPU 没有核显');
       const withinTarget = plan.totalCents <= plan.targetCents;
       const infeasible = !!plan.infeasible;
-      const passed = !infeasible && !missing.length && !conflicts.length && withinTarget;
-      const checks = { passed, infeasible, complete: !missing.length, missing, withinTarget, withinInputBudget: plan.totalCents <= request.budgetCents,
+      const constraintsSatisfied = !infeasible && !missing.length && !conflicts.length && withinTarget;
+      const passed = constraintsSatisfied && plan.compatibility?.overall === 'PASS' && !(plan.unmetRequirements?.length);
+      const checks = { passed, constraintsSatisfied, infeasible, complete: !missing.length, missing, withinTarget, withinInputBudget: plan.totalCents <= request.budgetCents,
         inputBudgetDifferenceCents: request.budgetCents - plan.totalCents, overall: plan.compatibility?.overall ?? null, savedOverall, conflicts, conditional, unknowns,
         score: plan.score?.total ?? null, sameAs: plan.sameAs ?? null };
-      const variant = { id: plan.id, label: plan.label, targetCents: plan.targetCents, igpu: plan.igpu, stockCooler: plan.stockCooler, checks, build };
+      const variant = { id: plan.id, label: plan.label, targetCents: plan.targetCents, igpu: plan.igpu, stockCooler: plan.stockCooler, recommendationStatus: plan.recommendationStatus, assessment: plan.assessment, corePerformance: plan.corePerformance, formalRecommendation: plan.formalRecommendation, checks, build };
       variants.push(variant);
       if (infeasible) {
         markdown.push(`## ${plan.label}`, '', `目标预算：${money(plan.targetCents)}。**这一档没有可行方案。**`, '', ...(plan.reasons ?? []).map(r => `- ${r}`),
@@ -78,12 +81,49 @@ try {
         continue;
       }
       backup.builds.push(build);
-      markdown.push(`## ${plan.label}`, '', `目标预算：${money(plan.targetCents)}；估算合计：${money(plan.totalCents)}；输入预算余额：${money(checks.inputBudgetDifferenceCents)}。`, '', '| 配件 | 型号 | 估算价格 |', '|---|---|---:|', ...build.slots.map(s => `| ${s.label} | ${cell(s.part?.model ?? '缺失')} | ${s.part ? money(s.part.priceCents) : '—'} |`), '', `综合评分：${plan.score?.total ?? '—'}${plan.sameAs ? `（与${plan.sameAs === 'save' ? '省钱版' : plan.sameAs === 'balanced' ? '推荐版' : '进阶版'}相同）` : ''}；兼容性：${checks.overall}。`, '', `检查：${passed ? '通过' : '存在问题'}。${missing.length ? `缺件：${missing.join('、')}。` : ''}${!withinTarget ? '超出本档目标预算。' : ''}${conflicts.length ? `不兼容：${conflicts.join('、')}。` : ''}`, '', `需满足条件：${conditional.join('、') || '无'}。待核实：${unknowns.join('、') || '无'}。`, '', ...plan.notes.map(n => `- ${n}`), '', '选件依据：', '', ...plan.picks.map(p => `- ${slotTypes.find(s => s.id === p.slot)?.label ?? p.slot}：${p.reason}`), '');
+      const statusText = { PASS: '已确认通过', CONDITIONAL: '条件通过，需满足指定条件', UNKNOWN: '数据不足，待核实', FAIL: '不兼容' }[checks.overall] ?? '无结论';
+      markdown.push(`## ${plan.label}`, '', `目标预算：${money(plan.targetCents)}；估算合计：${money(plan.totalCents)}；输入预算余额：${money(checks.inputBudgetDifferenceCents)}；本档目标预算余额：${money(plan.targetCents - plan.totalCents)}。`, '', `方案类别：${plan.recommendationStatus}；正式已确认推荐：${plan.formalRecommendation ? '是' : '否'}。`, '', '| 配件 | 型号 | 估算价格 |', '|---|---|---:|', ...build.slots.map(s => `| ${s.label} | ${cell(s.part?.model ?? '缺失')} | ${s.part ? money(s.part.priceCents) : '—'} |`), '', `综合评分：${plan.score?.total ?? '—'}${plan.sameAs ? '（与上一档相同）' : ''}；规则版本：${plan.score?.version ?? '未知'}（版本号，不是数据采集日期）。`, '', `兼容性：${checks.overall} — ${statusText}。${!withinTarget ? '超出本档目标预算，仅为替代方案。' : ''}${conflicts.length ? `不兼容：${conflicts.join('、')}。` : ''}`, '', `需满足条件：${conditional.join('、') || '无'}。待核实：${unknowns.join('、') || '无'}。`, '', '| 检查项目 | 状态 | 风险 | 需先核实 | 证据 / 条件 |', '|---|---|---|---|---|', ...planChecks.map(c => `| ${c.label} | ${c.status} | ${c.severity ?? '—'} | ${c.blocking ? '是' : '—'} | ${cell(c.detail)} |`), '', ...plan.notes.map(n => `- ${n}`), '', '选件依据及价格观察时间：', '', ...plan.picks.map(p => `- ${slotTypes.find(s => s.id === p.slot)?.label ?? p.slot}：${p.reason}；价格观察时间 ${p.item.priceObservedAt ?? '未知'}；性能数据日期 ${p.item.performance?.gaming?.observedAt ?? p.item.performance?.blender?.observedAt ?? '未标注，见数据来源快照'}。`), '');
     }
-    const result = { index: index + 1, label, testedAt, request, durationMs, rawResponse, variants };
+    const strictResponse = await fetch(`${base}/plans`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...request, maxOverPercent: 0 }) }).then(r => r.json());
+    assert.ok(Array.isArray(strictResponse.plans));
+    assert.ok(strictResponse.plans.every(p => p.infeasible || p.totalCents <= p.targetCents));
+    assert.ok(strictResponse.plans.every(p => !p.compatibility?.checks.some(c => c.status === 'FAIL')));
+    const strategyResponses = {};
+    if (process.env.V22_RETEST && [6, 10, 11].includes(index)) {
+      for (const strategy of ['value', 'performance']) {
+        const response = await fetch(`${base}/plans`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...request, strategy, maxOverPercent: 0 }) });
+        assert.equal(response.status, 200);
+        strategyResponses[strategy] = await response.json();
+        assert.ok(strategyResponses[strategy].plans.every(p => p.infeasible || p.totalCents <= p.targetCents));
+      }
+    }
+    let measuredResponse;
+    if (process.env.V22_RETEST && [6, 10].includes(index)) {
+      const workload = index === 6 ? { task: 'rayTracing', benchmarkId: 'gn-2025-wukong-4k-rt-upscaled' }
+        : { task: 'llm', benchmarkId: 'puget-2025-llamacpp-phi3-generation', model: 'Phi-3 Mini Q4_K_M' };
+      const response = await fetch(`${base}/plans`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...request, strategy: 'performance', workload, maxOverPercent: 0 }) });
+      assert.equal(response.status, 200);
+      const { plans, meta } = await response.json();
+      const comparable = plans.find(p => p.id === 'balanced').corePerformance.benchmark;
+      assert.equal(comparable.id, workload.benchmarkId);
+      assert.ok(plans.every(p => p.infeasible || (p.totalCents <= p.targetCents && (!p.corePerformance?.benchmark || p.corePerformance.benchmark.id === workload.benchmarkId))));
+      measuredResponse = { plans, strategy: meta.strategy, workload: meta.workload, elapsedMs: meta.elapsedMs };
+    }
+    const result = { index: index + 1, label, testedAt, request, durationMs, rawResponse, strictResponse, strategyResponses, measuredResponse, variants };
     results.push(result);
     await writeFile(join(output, `${filename}.json`), JSON.stringify(result, null, 2) + '\n');
+    if (process.env.V22_RETEST) {
+      markdown.splice(2, 0, `生成时间 ${testedAt}`, '');
+      for (const plan of rawResponse.plans.filter(p => !p.infeasible)) {
+        if (plan.assessment) markdown.push(`- ${plan.label} · 预算 ${plan.assessment.budget} · 需求 ${plan.assessment.requirements} · 物理 ${plan.assessment.physical} · 安全 ${plan.assessment.safety}`);
+        for (const option of plan.upgrades ?? []) markdown.push(`- 预算内升级 ${option.picks.find(p => p.slot === 'GPU')?.item.name ?? option.picks[0]?.item.name} · ${money(option.totalCents)} · ${option.reason}`);
+      }
+    }
     await writeFile(join(output, `${filename}.md`), markdown.join('\n'));
+    await mkdir(join(output, '候选日志'), { recursive: true });
+    await writeFile(join(output, '候选日志', `${filename}.json`), JSON.stringify(rawResponse.meta, null, 2) + '\n');
     console.log(JSON.stringify({ case: index + 1, budget: yuan, scenario, durationMs, variants: variants.map(v => ({ tier: v.id, total: v.build.totals.totalCents / 100, ...v.checks })) }));
   }
   // Validate actual restore/read/backup behavior in an isolated store.
@@ -93,18 +133,20 @@ try {
   assert.equal(restored.restored, backup.builds.length);
   const readback = await fetch(`${base}/builds/backup`).then(r => r.json());
   assert.deepEqual(readback.builds.map(b => normalizeBuild(b)), backup.builds.map(b => normalizeBuild(b)));
-  const sourceFiles = ['.runtime/zol-catalog.json', '.runtime/buildcores-catalog.json', '.runtime/blender-scores.json', 'data/perf-gaming.json', 'src/recommend.mjs', 'src/optimizer.mjs', 'src/scoring-profiles.mjs', 'src/compat-rules.mjs', 'src/catalog.mjs', 'src/api.mjs', 'web/src/domain/plan.ts', 'web/src/domain/catalog.ts', 'web/src/api/mapping.ts'];
+  const quality = await fetch(`${base}/catalog/quality-report`).then(r => r.json());
+  await writeFile(join(output, '数据质量报告.json'), JSON.stringify(quality, null, 2) + '\n');
+  const sourceFiles = ['.runtime/zol-catalog.json', '.runtime/buildcores-catalog.json', '.runtime/blender-scores.json', 'data/perf-gaming.json', 'data/hardware-corrections.json', 'data/scenario-performance.json', 'src/hardware-specs.mjs', 'src/recommend.mjs', 'src/optimizer.mjs', 'src/scoring-profiles.mjs', 'src/compat-rules.mjs', 'src/catalog.mjs', 'src/api.mjs', 'web/src/domain/plan.ts', 'web/src/domain/catalog.ts', 'web/src/api/mapping.ts'];
   const fingerprints = [];
   for (const file of sourceFiles) fingerprints.push({ file, sha256: createHash('sha256').update(await readFile(file)).digest('hex') });
   const all = results.flatMap(r => r.variants);
-  const summary = { testedAt, timezone: 'Asia/Bangkok', caseCount: results.length, variantCount: all.length, passedCount: all.filter(v => v.checks.passed).length, failedCount: all.filter(v => !v.checks.passed).length, quiet: false, peripherals: false, restoreReadbackPassed: true, fingerprints, cases: results.map(({ rawResponse, ...r }) => r) };
+  const summary = { testedAt, timezone: 'Asia/Bangkok', caseCount: results.length, variantCount: all.length, passedCount: all.filter(v => v.checks.passed).length, constraintsSatisfiedCount: all.filter(v => v.checks.constraintsSatisfied).length, unknownCount: all.filter(v => v.checks.overall === 'UNKNOWN').length, conditionalCount: all.filter(v => v.checks.overall === 'CONDITIONAL').length, failedCount: all.filter(v => !v.checks.constraintsSatisfied).length, strictBudgetPassed: true, quiet: false, peripherals: false, restoreReadbackPassed: true, fingerprints, cases: results.map(({ rawResponse, strictResponse, strategyResponses, ...r }) => ({ ...r, strictPlans: strictResponse.plans.map(p => ({ id: p.id, infeasible: !!p.infeasible, totalCents: p.totalCents, targetCents: p.targetCents, recommendationStatus: p.recommendationStatus })) })) };
   await writeFile(join(output, '全部方案_可导入备份.json'), JSON.stringify(backup, null, 2) + '\n');
   await writeFile(join(output, '测试结果.json'), JSON.stringify(summary, null, 2) + '\n');
-  const report = ['# 12 组装机配置测试', '', `测试时间：${new Date(testedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok', hour12: false })}（Asia/Bangkok）。`, '', '安静优先：全部关闭。顺带配外设：全部关闭。', '', `使用首页实际 POST /api/v1/plans 接口和本机目录，12 组输入共返回 ${all.length} 套方案；${summary.passedCount} 套通过已知条件检查，${summary.failedCount} 套存在问题。全部方案已通过备份导入和重读一致性检查。`, '', '“通过”要求无缺件、统一兼容规则下无 FAIL（不兼容）且不超本档目标预算；CONDITIONAL（需满足条件，如开 XMP / EXPO、BIOS 需更新）与 UNKNOWN（规格缺失待核实）单独列出。未进行实机装配、帧率、AI 性能或实时商城价格测试。', '', '每组 Markdown 含全部返回档位的配件清单与选件依据；同名 JSON 含请求、原始响应、可保存配置及检查结果。全部方案_可导入备份.json 可在工作台“我的方案”中恢复。测试存储放在 .test-store，现有方案和草稿未改动。', '', '进阶版目标预算通常比输入预算高 20%，省钱版约为 80%；下表同时标明两个预算，避免把进阶版误当作输入预算内方案。', '', '| 序号 | 输入预算 / 用途 | 版本 | 目标预算 | 估算合计 | 评分 | 兼容性 | 检查 | 需满足条件 / 待核实 |', '|---|---|---|---:|---:|---:|---|---|---|'];
+  const report = ['# 12 组装机配置测试', '', `测试时间：${new Date(testedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok', hour12: false })}（Asia/Bangkok）。`, '', '安静优先：全部关闭。顺带配外设：全部关闭。', '', `使用首页实际 POST /api/v1/plans 接口和本机目录，12 组输入共返回 ${all.length} 套方案；${summary.passedCount} 套已确认 PASS，${summary.unknownCount} 套 UNKNOWN，${summary.conditionalCount} 套 CONDITIONAL；${summary.failedCount} 套另有预算或配件问题。全部方案已通过备份导入和重读一致性检查。`, '', '“已确认通过”仅接受兼容性 PASS、预算内且达到最低需求。无已知冲突不等于已确认通过；CONDITIONAL（需满足条件，如开 XMP / EXPO、BIOS 需更新）与 UNKNOWN（规格缺失待核实）单独列出。未进行实机装配、帧率、AI 性能或实时商城价格测试。', '', '每组 Markdown 含全部返回档位的配件清单与选件依据；同名 JSON 含请求、原始响应、可保存配置及检查结果。全部方案_可导入备份.json 可在工作台“我的方案”中恢复。测试存储放在 .test-store，现有方案和草稿未改动。', '', '进阶版目标预算通常比输入预算高 20%，省钱版约为 80%；下表同时标明两个预算，避免把进阶版误当作输入预算内方案。', '', '| 序号 | 输入预算 / 用途 | 版本 | 目标预算 | 估算合计 | 评分 | 兼容性 | 检查 | 需满足条件 / 待核实 |', '|---|---|---|---:|---:|---:|---|---|---|'];
   for (const r of results) for (const v of r.variants) report.push(v.checks.infeasible
     ? `| ${r.index} | ${money(r.request.budgetCents)} / ${r.label} | ${v.label} | ${money(v.targetCents)} | — | — | — | 无可行方案 | |`
-    : `| ${r.index} | ${money(r.request.budgetCents)} / ${r.label} | ${v.label} | ${money(v.targetCents)} | ${money(v.build.totals.totalCents)} | ${v.checks.score ?? '—'}${v.checks.sameAs ? '（同上一档）' : ''} | ${v.checks.overall} | ${v.checks.passed ? '通过' : [...v.checks.missing.map(s => `缺${s}`), ...v.checks.conflicts, ...(!v.checks.withinTarget ? ['超目标预算'] : [])].join('、')} | ${[...v.checks.conditional, ...v.checks.unknowns].join('、')} |`);
-  report.push('', '重新运行：在项目根目录执行 `node scripts/test-configurations.mjs`。这会更新本目录的同名测试输出。', '');
+    : `| ${r.index} | ${money(r.request.budgetCents)} / ${r.label} | ${v.label} | ${money(v.targetCents)} | ${money(v.build.totals.totalCents)} | ${v.checks.score ?? '—'}${v.checks.sameAs ? '（同上一档）' : ''} | ${v.checks.overall} | ${v.checks.passed ? '已确认通过' : [v.checks.overall,...v.checks.missing.map(s => `缺${s}`), ...v.checks.conflicts, ...(!v.checks.withinTarget ? ['超目标预算'] : [])].join('、')} | ${[...v.checks.conditional, ...v.checks.unknowns].join('、')} |`);
+  report.push('', '12 组输入另执行严格预算测试：全部满足不超目标预算或独立显示无解；原始响应保存在各组 JSON 的 strictResponse。', '', '重新运行：在项目根目录执行 `node scripts/test-configurations.mjs`。这会更新本目录的同名测试输出。', '');
   await writeFile(join(output, '测试汇总.md'), report.join('\n'));
   console.log(JSON.stringify({ cases: summary.caseCount, variants: summary.variantCount, passed: summary.passedCount, failed: summary.failedCount, restoreReadbackPassed: true }));
 } finally {

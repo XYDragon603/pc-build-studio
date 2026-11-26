@@ -1,0 +1,281 @@
+{
+  "version": "2.2.0",
+  "verifiedOn": "2026-11-25",
+  "records": [
+    {
+      "id": "zol-1948423",
+      "sourceUrl": "https://www.asus.com/motherboards-components/cases/asus/asus-a21-case/techspec/",
+      "reason": "额外发现 A21 第三方支持列表错误包含 ATX / EATX；官网支持 Mini-ITX、Micro-ATX。",
+      "specs": {
+        "supportedBoardFormats": [
+          "MICRO ATX",
+          "MINI-ITX"
+        ],
+        "maxBoardFormFactor": "MICRO ATX",
+        "maxPsuLengthMm": 210,
+        "expansionSlots": 5,
+        "radiatorPositions": [
+          {
+            "position": "front",
+            "sizesMm": [
+              120,
+              140,
+              240,
+              280,
+              360
+            ]
+          },
+          {
+            "position": "top",
+            "sizesMm": [
+              120,
+              140,
+              240,
+              280,
+              360
+            ]
+          },
+          {
+            "position": "rear",
+            "sizesMm": [
+              120
+            ]
+          }
+        ],
+        "maxGpuLengthMm": 380,
+        "maxCoolerHeightMm": 165,
+        "fanMounts": [
+          {
+            "position": "front",
+            "count": 3,
+            "sizeMm": 120
+          },
+          {
+            "position": "front",
+            "count": 2,
+            "sizeMm": 140
+          },
+          {
+            "position": "top",
+            "count": 3,
+            "sizeMm": 120
+          },
+          {
+            "position": "top",
+            "count": 2,
+            "sizeMm": 140
+          },
+          {
+            "position": "rear",
+            "count": 1,
+            "sizeMm": 120
+          }
+        ],
+        "frontIntake": "mesh"
+      },
+      "fieldSources": {
+        "frontIntake": "https://www.asus.com/us/motherboards-components/cases/asus/asus-a21-case/"
+      },
+      "mpn": [
+        "90DC00H0-B09000"
+      ]
+    },
+    {
+      "id": "zol-2129880",
+      "sourceUrl": "https://www.deepcool.com/products/Cooling/cpuaircoolers/ASSASSIN-IV-VC-VISION-Digital-Air-Cooler-1700-AM5/2024/18964.shtml",
+      "reason": "核实原型号厂商标称 300W 与扣具列表；仍无对应整机持续温度实测，不能无条件通过。",
+      "specs": {
+        "vendorCoolingWatts": 300,
+        "sockets": [
+          "LGA1851",
+          "LGA1700",
+          "LGA1200",
+          "LGA115X",
+          "AM5",
+          "AM4"
+        ],
+        "coolingEvidence": {
+          "kind": "vendor-rated",
+          "confidence": "medium",
+          "sourceUrl": "https://www.deepcool.com/products/Cooling/cpuaircoolers/ASSASSIN-IV-VC-VISION-Digital-Air-Cooler-1700-AM5/2024/18964.shtml"
+        }
+      }
+    },
+    {
+      "id": "zol-1948010",
+      "sourceUrl": "https://www.sama.cn/archives/4004",
+      "reason": "机箱结构 ATX 不是支持主板规格；官网只声明 M-ATX 与 240 水冷，第三方 360 冷排记录有冲突，采用官网保守上限。",
+      "specs": {
+        "supportedBoardFormats": [
+          "MICRO ATX",
+          "MINI-ITX"
+        ],
+        "maxBoardFormFactor": "MICRO ATX",
+        "maxGpuLengthMm": 350,
+        "maxRadiatorMm": 240,
+        "frontIntake": "mesh"
+      }
+    },
+    {
+      "id": "zol-2178092",
+      "sourceUrl": "https://www.gigabyte.com/Motherboard/B850-AORUS-ELITE-X3D/sp",
+      "reason": "官网 ATX 305×244mm；CPU 不同会限制 PCIe，控制器信息缺失时不能假设始终 x16。",
+      "specs": {
+        "formFactor": "ATX",
+        "gpuPcieLink": {
+          "gen": 5,
+          "lanes": 16,
+          "physicalLanes": 16
+        },
+        "laneSharing": [
+          "Ryzen 8000 Phoenix 1 限 PCIe 4.0 x8，Phoenix 2 限 PCIe 4.0 x4；需核对实际 CPU 控制器"
+        ]
+      }
+    },
+    {
+      "id": "zol-1336495",
+      "sourceUrl": "https://www.amd.com/en/products/processors/chipsets/am4.html",
+      "reason": "AMD 官方 A520 规格是 PCIe 3.0，图形 x16，NVMe x4。七彩虹产品页本次访问 502；M.2 插槽的具体位置与共享限制仍须核对产品手册。",
+      "specs": {
+        "pcieGen": 3,
+        "gpuPcieLink": {
+          "gen": 3,
+          "lanes": 16,
+          "physicalLanes": 16
+        },
+        "m2Links": [
+          {
+            "protocol": "NVME",
+            "gen": 3,
+            "lanes": 4
+          }
+        ]
+      }
+    },
+    {
+      "id": "zol-1980547",
+      "sourceUrl": "https://www.deepcool.com/products/Cooling/cpuaircoolers/AG500-Performance-CPU-Cooler-1851-1700-AM5/2022/16250.shtml",
+      "reason": "厂商标称 240W，不是持续负载温度实测，不能据此直接 PASS；确认原型号 GP-Z-AG500，不扩散到 ARGB 变体。",
+      "specs": {
+        "vendorCoolingWatts": 240,
+        "heightMm": 155,
+        "coolingEvidence": {
+          "kind": "vendor-rated",
+          "sourceUrl": "https://www.deepcool.com/products/Cooling/cpuaircoolers/AG500-Performance-CPU-Cooler-1851-1700-AM5/2022/16250.shtml",
+          "confidence": "medium"
+        }
+      }
+    },
+    {
+      "id": "zol-2120074",
+      "sourceUrl": "https://www.inno3d.com.cn/product/inno3d-geforce-rtx-5090-d-chaojibinglong",
+      "reason": "中国版超级冰龙板卡规格覆盖芯片参考功耗和目录整数槽宽。",
+      "specs": {
+        "boardPowerWatts": 600,
+        "lengthMm": 334,
+        "heightMm": 148,
+        "thicknessMm": 73,
+        "slotWidth": 3.5,
+        "capacityGB": 32,
+        "memoryType": "GDDR7",
+        "recommendedPsuWatts": 1000,
+        "powerPins": {
+          "pin6": 0,
+          "pin8": 0,
+          "pin16": 1
+        },
+        "pcieGeneration": 5
+      }
+    },
+    {
+      "id": "zol-2130988",
+      "sourceUrl": "https://www.gigabyte.com/tw/Graphics-Card/GV-N506TWF2-16GD/sp",
+      "reason": "GV-N506TWF2-16GD 的 L/W/H 分别对应机箱限长、显卡高度和厚度。",
+      "specs": {
+        "lengthMm": 208,
+        "heightMm": 120,
+        "thicknessMm": 40,
+        "pcieGeneration": 5,
+        "recommendedPsuWatts": 650,
+        "powerPins": {
+          "pin6": 0,
+          "pin8": 1,
+          "pin16": 0
+        }
+      },
+      "mpn": [
+        "GV-N506TWF2-16GD"
+      ]
+    },
+    {
+      "id": "zol-2119748",
+      "sourceUrl": "https://rog.asus.com.cn/power-supply-units/rog-loki/rog-loki-1200t-sfx-l-gaming-model/spec/",
+      "reason": "中国官网规格。购买时核对批次，随箱支架和线长不代表每个机箱均可走线。",
+      "specs": {
+        "psuFormFactor": "SFX-L",
+        "atxVersion": "3.1",
+        "psuLengthMm": 125,
+        "psuWidthMm": 125,
+        "psuHeightMm": 63.5,
+        "psuAtxBracketIncluded": true,
+        "psuGpuCableMm": 450,
+        "psuCpuCableMm": 550,
+        "psuBoardCableMm": 450,
+        "rail12vAmps": 100
+      }
+    },
+    {
+      "id": "zol-1213501",
+      "sourceUrl": "https://www.amd.com/zh-cn/support/downloads/drivers.html/processors/ryzen/ryzen-2000-series/amd-ryzen-7-2700.html",
+      "reason": "AMD 公布的平台最高频率，实际配置仍受 DIMM 数量、Rank 与主板限制。",
+      "specs": {
+        "cpuMemoryMaxMTs": 2933,
+        "pcieLink": {
+          "gen": 3,
+          "lanes": 16
+        }
+      }
+    },
+    {
+      "id": "zol-2162063",
+      "sourceUrl": "https://www.intel.com/content/www/us/en/products/sku/245692/intel-core-ultra-7-processor-270k-plus-36m-cache-up-to-5-50-ghz/specifications.html",
+      "reason": "DDR5 7200 为官方最高规格，不能推断任意 DIMM 配置。",
+      "specs": {
+        "cpuMemoryMaxMTs": 7200,
+        "stockCoolerIncluded": false
+      }
+    },
+    {
+      "id": "zol-1440587",
+      "sourceUrl": "https://www.amd.com/en/products/processors/desktops/ryzen/7000-series/amd-ryzen-5-7600.html",
+      "reason": "AMD 盒装零售型号有附带散热。目录报价仍需匹配盒装料号，散片不能沿用。",
+      "specs": {
+        "cpuMemoryMaxMTs": 5200,
+        "cpuMemoryByModules": {
+          "2": 5200,
+          "4": 3600
+        },
+        "stockCoolerRetailSkus": [
+          "100-100001015BOX"
+        ],
+        "retailCoolerName": "Wraith Stealth"
+      }
+    },
+    {
+      "id": "zol-1440586",
+      "sourceUrl": "https://www.amd.com/en/products/processors/desktops/ryzen/7000-series/amd-ryzen-7-7700.html",
+      "reason": "AMD 盒装零售型号有附带散热。目录报价仍需匹配盒装料号，散片不能沿用。",
+      "specs": {
+        "cpuMemoryMaxMTs": 5200,
+        "cpuMemoryByModules": {
+          "2": 5200,
+          "4": 3600
+        },
+        "stockCoolerRetailSkus": [
+          "100-100000592SBX"
+        ],
+        "retailCoolerName": "Wraith Prism"
+      }
+    }
+  ]
+}

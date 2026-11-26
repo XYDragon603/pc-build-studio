@@ -1,11 +1,12 @@
 import type { CatalogItem, PlanResult } from '../api/client';
 import { API_TO_SLOT } from '../api/mapping';
 import { catalogToCandidate } from './catalog';
-import { boardFit, clearance, compatibility, estimatePower, type Check } from './compat';
+import { clearance, compatibility, estimatePower, type Check } from './compat';
 import { partFromCandidate } from './demoData';
 import { purposeOfScenarios } from './purposes';
 import { emptySlots } from './slots';
 import type { Build, Part, PartSpecs, SlotId } from './types';
+import { boardCaseStatus } from '../../../src/hardware-specs.mjs';
 
 import { INTEGRATED_GPU_NAME, STOCK_COOLER_NAME } from './placeholders';
 
@@ -32,18 +33,25 @@ export function emptyBuild(budgetCents: number, scenarios: string[], name: strin
 /** 把服务端的推荐方案转成可编辑的配置（价格均为估算） */
 export function planToBuild(plan: PlanResult, budgetCents: number, scenarios: string[]): Build {
   const b = emptyBuild(budgetCents, scenarios, planName(plan.label, scenarios));
+  const selectedPart = (item: CatalogItem, slot: SlotId, reason: string) => {
+    const record = item.priceRecord;
+    const priceSource: Part['priceSource'] = record ? record.priceType === 'verified' ? 'verified' : record.priceType === 'manual' ? 'manual' : 'historical' : 'estimate';
+    const provenance = record ? `；价格来源 ${record.sourceName}，${record.observedAt}，${record.condition}，库存 ${record.stockStatus}${record.sourceUrl ? `，${record.sourceUrl}` : ''}` : `；目录估算，价格观察时间 ${item.priceObservedAt ?? '未知'}`;
+    return partFromCandidate(catalogToCandidate(item, slot), item.estimatedPriceCents!, priceSource, `自动配置：${reason}${provenance}`.slice(0, 1000));
+  };
   for (const pick of plan.picks) {
     const slot = API_TO_SLOT[pick.slot];
     if (!slot || !pick.item.estimatedPriceCents) continue;
-    b.slots[slot] = { locked: false, part: partFromCandidate(catalogToCandidate(pick.item, slot), pick.item.estimatedPriceCents, 'estimate', `自动配置：${pick.reason}`) };
+    b.slots[slot] = { locked: false, part: selectedPart(pick.item, slot, pick.reason) };
   }
   for (const pick of plan.peripherals?.picks ?? []) {
     const slot = API_TO_SLOT[pick.slot];
     if (!slot || !pick.item.estimatedPriceCents) continue;
-    b.slots[slot] = { locked: false, part: partFromCandidate(catalogToCandidate(pick.item, slot), pick.item.estimatedPriceCents, 'estimate', `自动配置：${pick.reason}`) };
+    b.slots[slot] = { locked: false, part: selectedPart(pick.item, slot, pick.reason) };
   }
   if (plan.igpu) b.slots.gpu = { locked: false, part: placeholder(INTEGRATED_GPU_NAME, '不配独立显卡') };
   if (plan.stockCooler) b.slots.cooler = { locked: false, part: placeholder(STOCK_COOLER_NAME, '盒装自带，无需另买') };
+  for (const cost of plan.additionalCosts ?? []) b.custom.push({ id: cost.id.startsWith('custom-') ? cost.id : `custom-${cost.id}`, name: cost.name, spec: '机箱配置记录中的额外采购费用', priceCents: cost.priceCents });
   return b;
 }
 
@@ -92,8 +100,6 @@ export function buildChecks(b: Build): Check[] {
   return compatibility(b);
 }
 
-const BOARD_RANK: Record<string, number> = { 'MINI-ITX': 1, 'MICRO ATX': 2, ATX: 3, EATX: 4 };
-
 /** 换配件时的兼容过滤：只在双方都有数据时判断，数据缺失视为可用 */
 export function fitsBuild(slot: SlotId, specs: PartSpecs, b: Build): boolean {
   const s = (id: SlotId) => b.slots[id].part?.specs ?? {};
@@ -101,16 +107,14 @@ export function fitsBuild(slot: SlotId, specs: PartSpecs, b: Build): boolean {
   switch (slot) {
     case 'cpu': return eq(specs.socket, s('board').socket);
     case 'board': {
-      const max = BOARD_RANK[s('case').maxBoardFormFactor ?? ''];
-      const size = BOARD_RANK[specs.formFactor ?? ''];
-      return eq(specs.socket, s('cpu').socket) && eq(specs.memoryType, s('ram').memoryType) && (!max || !size || size <= max);
+      return eq(specs.socket, s('cpu').socket) && eq(specs.memoryType, s('ram').memoryType) && boardCaseStatus(specs as Record<string, unknown>, s('case') as Record<string, unknown>) !== 'FAIL';
     }
     case 'ram': return eq(specs.memoryType, s('board').memoryType);
     case 'gpu': return clearance(specs.lengthMm, s('case').maxGpuLengthMm).status !== 'conflict';
     case 'case': return clearance(s('gpu').lengthMm, specs.maxGpuLengthMm).status !== 'conflict'
       && clearance(s('cooler').heightMm, specs.maxCoolerHeightMm).status !== 'conflict'
       && clearance(s('cooler').radiatorSizeMm, specs.maxRadiatorMm).status !== 'conflict'
-      && boardFit(s('board').formFactor, specs.maxBoardFormFactor).status !== 'conflict';
+      && boardCaseStatus(s('board') as Record<string, unknown>, specs as Record<string, unknown>) !== 'FAIL';
     case 'cooler': return clearance(specs.heightMm, s('case').maxCoolerHeightMm).status !== 'conflict'
       && clearance(specs.radiatorSizeMm, s('case').maxRadiatorMm).status !== 'conflict';
     case 'psu': {

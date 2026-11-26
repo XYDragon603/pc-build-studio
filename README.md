@@ -1,5 +1,9 @@
 # 装机查价验证原型
 
+最近一次修复见 [V2.2.1 更新日志](docs/V2.2.1_CHANGELOG.md)。测试报告与 12 组配置含中关村在线型号与参考价，只保存在本机的 `reports/` 与 `配置/`，不在仓库中。UNKNOWN 表示资料不足，不是已确认兼容；高功耗散热与风道在没有整机实测时最多为“需满足条件”。
+
+回归测试：`npm test`（含 `test/search-correctness.test.mjs` 穷举对照）、`node scripts/batch-test.mjs`（108 套三策略矩阵与额外场景，走真实 `/plans`）。
+
 项目包含装机配置与报价 HTTP API，以及输出 JSON 和 Markdown 的查价验证工具。使用 Node.js 22+，无第三方运行依赖。
 
 在项目根目录运行 `npm start`，API 默认监听 `http://127.0.0.1:4310/api/v1`。前端可先调用演示配置和实查记录回放，无需密钥。查看 [前端对接文档](docs/api.md)。
@@ -89,7 +93,7 @@ node scripts/import-zol.mjs --category KEYBOARD --limit 100 --max-pages 3
 node scripts/import-zol.mjs --category MOUSE --limit 100 --max-pages 3
 ```
 
-外设在方案里单独一栏，不占主机预算：出方案时打开“顺带配外设”，会按用途和这套方案的显卡挑显示器（显卡够强配 27 寸 2K 高刷，较弱配 1080p 高刷，办公 24 寸 1080p），游戏配机械键盘和游戏鼠标，办公配无线键鼠。
+外设在方案里单独一栏，V2.1 起计入整机总预算：出方案时打开“顺带配外设”，会按用途和这套方案的显卡挑显示器（显卡够强配 27 寸 2K 高刷，较弱配 1080p 高刷，办公 24 寸 1080p），游戏配机械键盘和游戏鼠标，办公配无线键鼠。
 
 每次 `npm run catalog:prices` 都会把参考价追加到 `.runtime/zol-price-history.jsonl`。目录卡片显示“较上次 ↓/↑”和记录最低价；打开方案时会核对已选配件：估算价有变化可一键刷新，手动填的价格高于当前参考价也会提示（不会自动改）。
 

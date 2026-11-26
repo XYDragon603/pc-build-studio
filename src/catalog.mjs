@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { invalid, ApiError } from './api-error.mjs';
 import { peripheralTypes, slotTypes } from './builds.mjs';
 import { enrichSpecs } from './specs-enrich.mjs';
+import { correctHardware } from './catalog-corrections.mjs';
+import { productStatus } from './product-status.mjs';
 import { loadPerformance } from './performance.mjs';
 import { cpuKey, gpuKey } from './perfkeys.mjs';
 import { catalogFitStatus, parseCatalogFit } from './catalog-fit.mjs';
@@ -79,6 +81,7 @@ function addZol(items, zolItems) {
       imageSourceUrl: item.imageUrl ? item.imageSourceUrl : zol.imageSourceUrl,
       referencePriceCents: zol.referencePriceCents,
       priceObservedAt: zol.priceObservedAt ?? null,
+      ...(zol.catalogImportedAt ? { catalogImportedAt: zol.catalogImportedAt } : {}),
       zolId: zol.id,
       zolUrl: zol.sourceUrl,
       rawParams: zol.rawParams,
@@ -545,19 +548,25 @@ function pagination(value, fallback, min, max, field) {
   return number;
 }
 
-export function createCatalog(directory = '.runtime') {
+export function createCatalog(directory = '.runtime', manualOverrides) {
+  const overrides = manualOverrides ?? readImported(directory, 'spec-overrides.json').overrides ?? {};
   const imported = readImported(directory);
   const zol = readImported(directory, 'zol-catalog.json');
   const performance = loadPerformance(directory);
   const items = addImages(addTrends(addPriceConfidence(addClassEstimates(addEstimates(addPowerEstimates(addZol(mergeCatalog(imported.items), zol.items)
     // 从参数表补全接口数量、尺寸、12V 输出等字段（只补缺的，不覆盖）
-    .map(item => (item.rawParams ? { ...item, specs: enrichSpecs(item) } : item))
+    .map(item => correctHardware({ ...item, specs: enrichSpecs(item) }, overrides))
     .filter(item => !notForDesktop(item))
     .map(item => item.category === 'CPU' && WORKSTATION_CPU.test(item.name) ? { ...item, workstation: true } : item))))), readPriceHistory(directory))
-    .map(item => ({
-      ...performance.attach(item),
-      market: item.dataSource === 'zol' || item.zolId || verifiedIds.has(item.id) ? 'cn' : 'global',
-    })), readPartImages());
+    .map(item => {
+      const status = productStatus(item);
+      return {
+        ...performance.attach(item),
+        market: item.dataSource === 'zol' || item.zolId || verifiedIds.has(item.id) ? 'cn' : 'global',
+        // 商品状态（new / used / refurbished / modified / engineering_sample / unknown），默认推荐只用 new
+        productStatus: status.status, productStatusReason: status.reason,
+      };
+    }), readPartImages());
   const attributions = [imported.attribution, zol.attribution].filter(Boolean);
   const byId = new Map(items.map(item => [item.id, item]));
   const searchIndex = items.map(item => ({ item,
@@ -566,6 +575,7 @@ export function createCatalog(directory = '.runtime') {
   }));
 
   return {
+    performanceSources: performance.meta,
     /** 全部条目（不含原始参数表），供自动配置使用 */
     all() {
       return items.map(brief);

@@ -8,6 +8,7 @@ import { ALL_SLOTS } from '../domain/slots';
 import type { SlotId } from '../domain/types';
 import { SearchSuggest } from './SearchSuggest';
 import { useCatalogItems } from './data';
+import { SpecCorrection } from './SpecCorrection';
 
 const CONDITIONS: Record<PriceCondition, string> = { new: '全新', 'old-stock': '库存新品', used: '二手', refurbished: '翻新', oem: 'OEM / 拆机' };
 const TYPES = { manual: '手动输入', verified: '已核实商城报价', reference: '商品参考价', estimate: '历史估算' } as const;
@@ -20,9 +21,12 @@ const yuanToCents = (text: string) => {
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null;
 };
 
-interface Draft { price: string; shipping: string; sourceName: string; sourceUrl: string; condition: PriceCondition; stockStatus: keyof typeof STOCK; priceType: 'manual' | 'verified'; observedAt: string; note: string }
-const today = () => new Date().toISOString().slice(0, 10);
-const emptyDraft = (): Draft => ({ price: '', shipping: '', sourceName: '', sourceUrl: '', condition: 'new', stockStatus: 'unknown', priceType: 'manual', observedAt: today(), note: '' });
+interface Draft { sku: string; price: string; shipping: string; sourceName: string; sourceUrl: string; condition: PriceCondition; stockStatus: keyof typeof STOCK; priceType: 'manual' | 'verified'; observedAt: string; quotedAt: string; note: string }
+const today = () => {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
+const emptyDraft = (): Draft => ({ sku: '', price: '', shipping: '', sourceName: '', sourceUrl: '', condition: 'new', stockStatus: 'unknown', priceType: 'manual', observedAt: today(), quotedAt: '', note: '' });
 
 /**
  * 价格管理：你自己录入的价格（与配件规格分开存放）。
@@ -59,7 +63,8 @@ export function PriceManager({ onToast }: { onToast: (text: string) => void }) {
         componentId: part.id, priceCents, shippingCents: yuanToCents(draft.shipping) ?? 0,
         sourceName: draft.sourceName.trim() || '手动输入', sourceUrl: draft.sourceUrl.trim() || null,
         condition: draft.condition, stockStatus: draft.stockStatus, priceType: draft.priceType,
-        observedAt: new Date(draft.observedAt + 'T12:00:00').toISOString(), note: draft.note.trim(),
+        sku: draft.sku.trim() || null, observedAt: draft.observedAt === today() ? new Date().toISOString() : new Date(draft.observedAt + 'T00:00:00').toISOString(), note: draft.note.trim(),
+        quotedAt: draft.priceType === 'verified' && draft.quotedAt ? new Date(`${draft.quotedAt}T00:00:00`).toISOString() : null,
       });
       onToast(`已记录 ${part.name} ${formatYuan(priceCents)}`);
       setDraft(d => ({ ...emptyDraft(), sourceName: d.sourceName }));
@@ -137,10 +142,19 @@ export function PriceManager({ onToast }: { onToast: (text: string) => void }) {
               <option value="verified">已核实商城报价</option>
             </select>
           </label>
+          <label>商品 SKU<input value={draft.sku} onChange={e => set('sku', e.target.value)} maxLength={80} /></label>
           <label>看到的日期<input type="date" value={draft.observedAt} max={today()} onChange={e => set('observedAt', e.target.value)} /></label>
+          {draft.priceType === 'verified' && <label>实际报价日期（可选）<input type="date" value={draft.quotedAt} max={draft.observedAt || today()} onChange={e => set('quotedAt', e.target.value)} /></label>}
           <label className="wide">备注<input value={draft.note} onChange={e => set('note', e.target.value)} maxLength={200} /></label>
           <button type="button" className="nx-btn nx-btn-primary" onClick={() => void add()} disabled={busy || !part}>{busy ? <Loader2 className="spin" /> : <Plus size={17} />}保存</button>
         </div>
+      </section>
+
+      {part && <SpecCorrection key={part.id} part={part} onSaved={onToast} />}
+      <section className="nx-panel">
+        <h2>配件数据质量</h2>
+        <p className="nx-muted">检查价格倒挂、老型号库存、估算价时间和缺失规格，保留原始价格与来源供复核。</p>
+        <button type="button" className="nx-btn nx-btn-outline" onClick={() => { void api.qualityReport().then(report => { downloadText('配件数据质量报告.json', JSON.stringify(report, null, 2), 'application/json'); onToast(`已导出 ${report.itemCount} 件配件的数据质量报告`); }).catch(e => onToast(e instanceof Error ? e.message : '读取失败')); }}>导出数据质量报告</button>
       </section>
 
       <section className="nx-panel" aria-labelledby="nx-price-list">
@@ -166,13 +180,13 @@ export function PriceManager({ onToast }: { onToast: (text: string) => void }) {
                   const reference = item?.estimatedPriceCents;
                   return (
                     <tr key={r.id}>
-                      <td>{item?.name ?? r.componentId}{r.note && <div className="nx-muted small">{r.note}</div>}</td>
+                      <td>{item?.name ?? r.componentId}{r.sku && <div className="nx-muted small">SKU {r.sku}</div>}{r.note && <div className="nx-muted small">{r.note}</div>}</td>
                       <td className="nx-amount" title={reference ? `参考价 ${formatYuan(reference)}` : undefined}>
                         {formatYuan(r.priceCents)}{r.shippingCents > 0 && <div className="nx-muted small">+运费 {formatYuan(r.shippingCents)}</div>}
                       </td>
                       <td>{CONDITIONS[r.condition]}{r.stockStatus !== 'unknown' && ` · ${STOCK[r.stockStatus]}`}</td>
                       <td>{r.sourceUrl ? <a href={r.sourceUrl} target="_blank" rel="noreferrer noopener">{r.sourceName}</a> : r.sourceName}<div className="nx-muted small">{TYPES[r.priceType]}</div></td>
-                      <td>{r.observedAt.slice(0, 10)}{age > 30 && <div className="nx-stale small">已过期（{age} 天前）</div>}</td>
+                      <td>{new Date(r.observedAt).toLocaleDateString('zh-CN')}{r.quotedAt && <div className="nx-muted small">报价 {new Date(r.quotedAt).toLocaleDateString('zh-CN')}</div>}{age > 30 && <div className="nx-stale small">已过期（{age} 天前）</div>}</td>
                       <td><button type="button" className="nx-icon-btn nx-remove" aria-label={`删除 ${item?.name ?? r.componentId} 的价格`} onClick={() => void remove(r.id)}><Trash2 size={15} /></button></td>
                     </tr>
                   );

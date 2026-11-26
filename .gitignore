@@ -14,3 +14,6 @@ data/part-images.json
 
 # 数据质量报告含型号与 ZOL 参考价，只留本地
 reports/*.local.md
+
+# V2.1 / V2.2 / V2.2.1 测试报告含 ZOL 型号与参考价，只留本地
+reports/v2.*/

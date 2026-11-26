@@ -1,5 +1,17 @@
 # 装机工作台 API v1
 
+## V2.1 行为更新
+
+`POST /plans` 与 `POST /recommend` 使用同一组合优化和最终兼容性规则。`/plans` 可附 `workload: { task, game?, targetFps?, quality?, material?, ambientC?, cpuPowerLimitWatts?, maxNoiseDbA? }`。一级用途与细分任务必须匹配；没有对应场景实测时返回明确标记的代理及低可信度，不能据此确认目标 FPS。
+
+方案带 `recommendationStatus`：`feasible`（已确认可行）、`conditional`、`verification_required`、`degraded`、`over_budget_alternative` 或 `infeasible`。`formalRecommendation` 只在已确认可行时为 true。整机 `compatibility.overall` 保留 PASS / CONDITIONAL / UNKNOWN / FAIL；任何 UNKNOWN 不简化成通过。严格预算 `maxOverPercent: 0` 下无解时 `picks: []`，超预算配置仅在独立的 `alternative` 中展示，`partialPicks` 只是未配齐的候选线索。
+
+**外设费用现计入总预算**。请求 `peripherals` 时各档同时比较主机与外设合计；方案 `totalCents` 是主机、额外采购与外设总价，`hostTotalCents` 单列主机。保存配置的 `totals.totalCents` 仍是主机小计，`grandTotalCents` 是总价，`remainingCents = budgetCents - grandTotalCents`。机箱已知额外风扇费用通过方案 `additionalCosts` 单列，并保存为自定义槽位；未知费用保留待核实说明。
+
+`GET /catalog/quality-report` 导出含时间、价格来源、SKU 规格冲突、倒挂、库存未知和散热数据缺失的数据质量报告。`PUT /catalog/:id/specs` 接收 `{ specs, sourceUrl, note? }`；HTTPS 来源必填，字段有类型与范围校验，持久化在 `spec-overrides.json`，立即用于下一次搜索。官方核实修正保存在 `data/hardware-corrections.json`，原始目录与价格不被无来源覆盖。
+
+保存配件的 `priceSource` 增加 `verified` 与 `historical`，分别表示已核实市场报价与历史报价。未来观察时间被拒绝。响应 `meta` 提供目录过滤、候选数量、预算剪枝、规格 / 品质淘汰、Top-K、价格记录及关键 GPU 替代方案；搜索有界，不证明全局最优。
+
 在项目根目录运行 `npm start`。地址默认为 `http://127.0.0.1:4310/api/v1`。在 `.env` 中设置 `PORT` 可换端口。配置保存到 `.runtime/builds.json`，由一个本地 API 进程写入。
 
 本地前端可以从 `http://localhost:5173` 或其他 HTTP(S) 回环地址直连接口。若 UI 跑在云端预览环境，需要在本机启动前端或配置合适的开发代理。所有带请求体的接口使用 `Content-Type: application/json`。
@@ -163,6 +175,10 @@ npm run catalog:import
 
 - `maxOverPercent`：`null` 不限；`0` 严格预算（每档不超过本档目标）；`1`–`50` 允许超出的百分比。
 - `priceMode`：`estimate` 参考估算（默认）；`manual` 优先我的价格（见下文价格记录）。`allowUsed` 只在 `manual` 下生效。
+- `strategy`：`value` 性价比优先 / `balanced` 均衡推荐（默认）/ `performance` 预算内性能优先（2.2.1：前两者以场景综合评分减成本为目标，后者先最大化工作负载核心性能）。
+- `workload.minVramGB`、`workload.minSsdGB`（2.2.1）：显存 / 硬盘最低容量，软约束，达不到时方案的 `unmetRequirements` 标明。
+- `allowModified`（2.2.1，默认 `false`）：允许非原厂改装 / 工程样品参与推荐。目录条目带 `productStatus`（`new` / `used` / `refurbished` / `modified` / `engineering_sample` / `unknown`）与 `productStatusReason`；默认只用 `new`，被排除的 CPU / 显卡列在 `meta.productStatusFilter.excluded`。
+- 方案的 `tradeoffs`（2.2.1）：与上一档相比上升 / 下降的显存、显卡指标、CPU 指标、内存与硬盘容量。
 - `locked`：硬约束，键为标准槽位；`GPU: { igpu: true }` 表示锁定使用核显。
 
 返回 `{ plans, priceMeta }`，`plans` 固定三档（`save` / `balanced` / `plus`，目标为预算的 80% / 100% / 120%）。每档含 `picks`、`totalCents`、`budget`（输入、目标、上限与差额）、`compatibility`（`overall` 与 `checks[]`，状态为 `PASS` / `FAIL` / `CONDITIONAL` / `UNKNOWN` / `NOT_APPLICABLE`）、`score`（`total` 0–100、`parts` 分项 0–100、`bottleneck`、`version`）、`sameAs`（与哪一档相同）和 `notes`。找不到可行组合时 `infeasible: true`，附 `reasons`、`minFeasibleCents`、`suggestions`，不会悄悄少一档。

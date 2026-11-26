@@ -145,10 +145,11 @@ describe('外设槽位', () => {
   const monitor = { ...candidateById('gpu-galax')!, id: 'monitor-1', slot: 'monitor' as const, name: 'AOC Q27G40E', specs: {} };
   const withMonitor = buildReducer(demoBuild(), { type: 'addCandidate', candidate: monitor, priceCents: 109900, priceSource: 'estimate' });
 
-  it('外设单独计价，不占主机预算；前后端合计一致', () => {
+  it('外设单独列价并计入预算余额；前后端合计一致', () => {
     const t = totals(withMonitor);
     expect([t.totalCents, t.peripheralCents, t.grandTotalCents, t.peripheralCount]).toEqual([394400, 109900, 504300, 1]);
     expect(t.missing).toEqual(['gpu']);
+    expect(t.remainingCents).toBe(withMonitor.budgetCents - t.grandTotalCents);
     const server = viaBackend(withMonitor).totals;
     expect([server.totalCents, server.peripheralCents, server.grandTotalCents, server.remainingCents])
       .toEqual([t.totalCents, t.peripheralCents, t.grandTotalCents, t.remainingCents]);

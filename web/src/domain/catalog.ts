@@ -1,5 +1,6 @@
 import type { CatalogItem } from '../api/client';
 import type { Candidate, PartSpecs, SlotId } from './types';
+import { hardwareDetails } from '../../../src/hardware-specs.mjs';
 
 const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
 const s = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
@@ -24,6 +25,7 @@ export function boardFromCaseType(value: unknown): string | undefined {
  */
 export function catalogSpecs(slot: SlotId, specs: CatalogItem['specs']): PartSpecs {
   const out: PartSpecs = {};
+  Object.assign(out, hardwareDetails(specs));
   const socket = s(specs.socket);
   const memoryType = s(specs.memoryType);
   if (socket && (slot === 'cpu' || slot === 'board')) out.socket = socket.toUpperCase();
@@ -32,6 +34,7 @@ export function catalogSpecs(slot: SlotId, specs: CatalogItem['specs']): PartSpe
   if (memoryType && (slot === 'board' || slot === 'ram')) out.memoryType = memoryType.toUpperCase();
   if (slot === 'gpu') {
     out.lengthMm = up(specs.lengthMm);
+    out.heightMm = up(specs.heightMm);
     out.maxPowerWatts = up(specs.tdpWatts);
     out.recommendedPsuWatts = up(specs.recommendedPsuWatts);
     out.gpuPowerConnector = s(specs.powerConnectors)?.toUpperCase().replace(/\s+/g, '');

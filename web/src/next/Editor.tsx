@@ -142,7 +142,7 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
                 {SLOTS.map(({ id, label }) => renderRow(id, label))}
                 {build.custom.map(part => <tr key={part.id}><th scope="row"><span className="nx-slot-caption">自定义</span></th><td><strong>{part.name}</strong><div className="nx-muted small">{part.spec}</div></td><td>—</td><td className="nx-amount">{part.priceCents == null ? '—' : formatYuan(part.priceCents)}</td><td><button type="button" className="nx-icon-btn nx-remove" aria-label={`移除${part.name}`} onClick={() => dispatch({ type: 'removeCustom', id: part.id })}><Trash2 size={15} /></button></td></tr>)}
                 <tr className="nx-group-row">
-                  <th scope="rowgroup" colSpan={5}>外设<small>可选，不占主机预算{t.peripheralCount > 0 ? ` · 小计 ${formatYuan(t.peripheralCents)}` : ''}</small></th>
+                  <th scope="rowgroup" colSpan={5}>外设<small>可选，计入整机总预算{t.peripheralCount > 0 ? ` · 小计 ${formatYuan(t.peripheralCents)}` : ''}</small></th>
                 </tr>
                 {PERIPHERALS.map(({ id, label }) => renderRow(id, label))}
               </tbody>
@@ -165,9 +165,9 @@ export function Editor({ build, dispatch, activeSlot, picker, onPick, onClosePic
       <footer className="nx-editor-footer">
         <div className="nx-footer-metrics">
           <span><Wallet size={18} />预算 <strong>{formatYuan(build.budgetCents)}</strong></span>
-          <span title={`包含 ${t.estimateCount} 项估算价，${t.unknownPriceCount} 项待填价`}><CircleDollarSign size={18} />预计总价 <strong>{formatYuan(t.totalCents)}</strong></span>
+          <span title={`包含 ${t.estimateCount} 项估算价，${t.unknownPriceCount} 项待填价`}><CircleDollarSign size={18} />预计总价 <strong>{formatYuan(t.grandTotalCents)}</strong></span>
           <span><PieChart size={18} />{over ? '超出预算' : '剩余预算'} <strong className={over ? 'nx-over' : ''}>{formatYuan(Math.abs(t.remainingCents))}</strong></span>
-          {t.peripheralCount > 0 && <span title="外设不占主机预算">外设 <strong>{formatYuan(t.peripheralCents)}</strong> · 合计 <strong>{formatYuan(t.grandTotalCents)}</strong></span>}
+          {t.peripheralCount > 0 && <span title="外设计入整机总预算">外设 <strong>{formatYuan(t.peripheralCents)}</strong> · 合计 <strong>{formatYuan(t.grandTotalCents)}</strong></span>}
         </div>
         {status !== 'ok' && <button type="button" className={`nx-tag ${status}`} title={summary.text} onClick={onClosePicker}><StatusIcon size={17} />{summary.level === 'ok' && bios ? bios.label : '兼容性待核对'}</button>}
         <div className="nx-footer-actions">

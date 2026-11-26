@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "cohorts": [
+    {
+      "id": "cb-2024-cs2-1080p-very-high",
+      "task": "esports",
+      "title": "Counter-Strike 2 · 1080p 最高",
+      "game": "Counter-Strike 2",
+      "gameAliases": ["CS2"],
+      "quality": "最高",
+      "resolution": "1920x1080",
+      "conditions": "Very High, 8× MSAA, Ryzen 9 7950X3D, DDR5-6000, Windows 11 23H2",
+      "unit": "fps-average",
+      "reference": 100,
+      "publishedAt": "2024-04-29",
+      "sourceUrl": "https://www.computerbase.de/artikel/gaming/counter-strike-2-benchmark-test.87904/",
+      "results": { "RTX 4090": 395.7, "RTX 4070 TI SUPER": 330.5, "RTX 4070": 234.1, "RTX 4060": 157.4, "RTX 3060 TI": 176.3, "RX 7700 XT": 183.1, "RX 7600": 120.2, "RX 6600": 103.1, "ARC A750": 113.2 }
+    },
+    {
+      "id": "gn-2025-re4-1440p-raster",
+      "task": "raster",
+      "title": "Resident Evil 4 · 1440p 光栅",
+      "game": "Resident Evil 4",
+      "resolution": "2560x1440",
+      "conditions": "Prioritize Graphics, Ryzen 7 9800X3D, DDR5-6000, ReBAR, Windows 11, 4-pass average",
+      "unit": "fps-average",
+      "reference": 100,
+      "publishedAt": "2025-02-21",
+      "sourceUrl": "https://gamersnexus.net/gpus/do-not-buy-nvidia-rtx-5070-ti-gpu-absurdity-benchmarks-review",
+      "results": { "RTX 5090": 348.8, "RTX 4090": 278.2, "RX 7900 XTX": 231.9, "RTX 5080": 223.9, "RTX 4080 SUPER": 203.6, "RTX 5070 TI": 198.7, "RTX 4070 TI SUPER": 173.3, "RTX 4070": 123.8, "RTX 4060": 69.2, "RX 7800 XT": 137.3, "RX 7700 XT": 118.2, "RX 7600": 71.8, "ARC B580": 84.8 }
+    },
+    {
+      "id": "gn-2025-re4-4k-raster",
+      "task": "raster4k",
+      "title": "Resident Evil 4 · 4K 光栅",
+      "game": "Resident Evil 4",
+      "resolution": "3840x2160",
+      "conditions": "GamersNexus RTX 5070 Ti review, Resident Evil 4 4K raster chart",
+      "unit": "fps-average",
+      "publishedAt": "2025-02-21",
+      "sourceUrl": "https://gamersnexus.net/gpus/do-not-buy-nvidia-rtx-5070-ti-gpu-absurdity-benchmarks-review",
+      "results": { "RTX 5070 TI": 107, "RTX 5080": 122, "RX 7900 XTX": 126, "RTX 3070 TI": 53 }
+    },
+    {
+      "id": "gn-2025-wukong-4k-rt-upscaled",
+      "task": "rayTracing",
+      "title": "Black Myth: Wukong · 4K 光追＋超分",
+      "game": "Black Myth: Wukong",
+      "resolution": "3840x2160",
+      "conditions": "GamersNexus RTX 5070 Ti review, Black Myth: Wukong 4K ray tracing with upscaling",
+      "unit": "fps-average",
+      "publishedAt": "2025-02-21",
+      "sourceUrl": "https://gamersnexus.net/gpus/do-not-buy-nvidia-rtx-5070-ti-gpu-absurdity-benchmarks-review",
+      "results": { "RTX 5070 TI": 52, "RTX 5080": 59 }
+    },
+    {
+      "id": "puget-2025-premiere-longgop",
+      "task": "premiere",
+      "title": "Premiere Pro 25.1 · LongGOP Extended",
+      "conditions": "PugetBench 1.1.0 LongGOP Extended, Premiere Pro 25.1.0, Ryzen 9 9950X test platform",
+      "unit": "pugetbench-longgop-score",
+      "reference": 80,
+      "publishedAt": "2025-01-23",
+      "sourceUrl": "https://www.pugetsystems.com/labs/articles/nvidia-geforce-rtx-5090-content-creation-review/",
+      "results": { "RX 7900 XTX": 101.50, "RTX 5090": 91.20, "RTX 4090": 80.00, "RTX 3090 TI": 74.00, "RTX 2080 TI": 71.80 }
+    },
+    {
+      "id": "puget-2025-llamacpp-phi3-generation",
+      "task": "llm",
+      "title": "llama.cpp · Phi-3 Mini Q4 推理",
+      "model": "Phi-3 Mini Q4_K_M",
+      "conditions": "llama.cpp build 4493, Phi-3-mini-4k-instruct Q4_K_M, token generation, Ryzen 9 9950X, Windows",
+      "unit": "tokens-per-second",
+      "reference": 125,
+      "publishedAt": "2025-02-21",
+      "sourceUrl": "https://www.pugetsystems.com/labs/articles/nvidia-geforce-rtx-5090-amp-5080-ai-review/",
+      "results": { "RTX 5090": 316, "RTX 4090": 245, "RTX 5080": 232, "RTX 3090 TI": 219, "RTX 3080 TI": 207, "RTX 4080 SUPER": 204, "RTX 4080": 196, "RX 7900 XTX": 171, "RTX 2080 TI": 125 }
+    },
+    {
+      "id": "puget-2025-sdnext-sdxl-batch1",
+      "task": "aiImage",
+      "title": "SD.Next · SDXL 图像生成",
+      "model": "SDXL Base 1.0",
+      "resolution": "512x512",
+      "conditions": "SD.Next 2025-01-29, SDXL Base 1.0, SDPA, 50 steps, batch 1, Ryzen 9 9950X, Windows",
+      "unit": "iterations-per-second",
+      "reference": 10,
+      "publishedAt": "2025-02-21",
+      "sourceUrl": "https://www.pugetsystems.com/labs/articles/nvidia-geforce-rtx-5090-amp-5080-ai-review/",
+      "results": { "RTX 5080": 19.13, "RTX 4080": 17.14, "RTX 4080 SUPER": 16.89, "RTX 4090": 16.78, "RTX 5090": 16.16, "RTX 3090 TI": 15.29, "RTX 3080 TI": 14.97, "RTX 2080 TI": 2.81 }
+    },
+    {
+      "id": "puget-2025-topaz-video-ai-overall",
+      "task": "videoEnhancement",
+      "title": "Topaz Video AI · 视频增强与插帧",
+      "conditions": "Topaz Video AI 6.0.3.0 built-in overall score, Ryzen 9 9950X, Windows",
+      "unit": "topaz-overall-score",
+      "reference": 400,
+      "publishedAt": "2025-02-21",
+      "sourceUrl": "https://www.pugetsystems.com/labs/articles/nvidia-geforce-rtx-5090-amp-5080-ai-review/",
+      "results": { "RTX 4090": 833, "RTX 5090": 792, "RTX 4080 SUPER": 705, "RTX 4080": 693, "RTX 5080": 611, "RTX 3090 TI": 611, "RX 7900 XTX": 562, "RTX 3080 TI": 562, "RTX 2080 TI": 370 }
+    },
+    {
+      "id": "puget-2023-sdxl-lora-sdpa-dim64",
+      "task": "finetuning",
+      "title": "SDXL LoRA · SDPA Dim 64",
+      "model": "SDXL Base 1.0",
+      "resolution": "1024x1024",
+      "conditions": "Kohya GUI 22.2.1, SDXL, SDPA, network dimension 64, Adafactor, batch 1, 520 steps, no checkpointing, CUDA 12.1 or ROCm 5.6 on Ubuntu",
+      "unit": "iterations-per-second",
+      "reference": 1,
+      "publishedAt": "2023-12-20",
+      "sourceUrl": "https://www.pugetsystems.com/labs/articles/stable-diffusion-lora-training-consumer-gpu-analysis/",
+      "results": { "RTX 4090 24GB": 1.79, "RTX 3090 24GB": 1.42, "RX 7900 XTX 24GB": 1.28 }
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import { invalid } from './api-error.mjs';
 import { boardFit, clearance } from './builds.mjs';
+import { boardCaseStatus } from './hardware-specs.mjs';
 
 const categoryFields = {
   CPU: ['socket'],
@@ -50,7 +51,7 @@ export function catalogFitStatus(specs, fit) {
   if ('socket' in fit) checks.push(same(specs.socket, fit.socket));
   if ('memoryType' in fit) checks.push(same(specs.memoryType, fit.memoryType));
   if ('maxBoardFormFactor' in fit) checks.push(boardFit(formFactor(specs.formFactor), formFactor(fit.maxBoardFormFactor)).status);
-  if ('boardFormFactor' in fit) checks.push(boardFit(formFactor(fit.boardFormFactor), formFactor(specs.maxBoardFormFactor ?? specs.formFactor)).status);
+  if ('boardFormFactor' in fit) checks.push(({ PASS: 'pass', FAIL: 'conflict', UNKNOWN: 'unknown' })[boardCaseStatus({ formFactor: formFactor(fit.boardFormFactor) }, specs)]);
   if ('maxGpuLengthMm' in fit) checks.push(dimension(specs.lengthMm, fit.maxGpuLengthMm));
   if ('gpuLengthMm' in fit) checks.push(dimension(fit.gpuLengthMm, specs.maxGpuLengthMm));
   if ('coolerHeightMm' in fit) checks.push(dimension(fit.coolerHeightMm, specs.maxCoolerHeightMm));

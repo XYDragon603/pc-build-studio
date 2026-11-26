@@ -15,7 +15,7 @@ const COMPARISON_IDS = new Set<string>(COMPARISON_SLOTS);
 
 const TIER_NAMES = { save: '省钱版', balanced: '推荐版', plus: '进阶版' } as const;
 
-const SCORE_LABELS: Record<ScorePart, string> = { gpu: '显卡', cpu: 'CPU', memory: '内存', storage: '硬盘', quality: '电源 / 主板 / 散热品质', noise: '安静程度', trust: '数据可信度' };
+const SCORE_LABELS: Record<ScorePart, string> = { gpu: '显卡性能代理', cpu: 'CPU 性能代理', memory: '内存', storage: '硬盘', quality: '供电与散热依据', noise: '噪音实测依据', trust: '数据可信度', balance: 'CPU 与 GPU 匹配', upgrade: '升级潜力' };
 
 /** 综合评分（0–100）与分项：分项是同一目录里候选之间的相对值，不代表实际帧数 */
 function ScoreBlock({ score, office }: { score: NonNullable<PlanResult['score']>; office: boolean }) {
@@ -28,6 +28,7 @@ function ScoreBlock({ score, office }: { score: NonNullable<PlanResult['score']>
         <Gauge size={15} aria-hidden /> 综合评分 <strong>{score.total.toFixed(1)}</strong><ChevronDown size={14} className={open ? 'rot' : ''} />
       </button>
       {open && <ul className="nx-score-parts">
+        {score.performanceBasis && <li><span>{score.performanceBasis}；仅在同场景、同版本内比较</span></li>}
         {parts.map(k => (
           <li key={k}><span>{SCORE_LABELS[k]}</span><span className="nx-score-bar" aria-hidden><i style={{ width: `${score.parts[k]}%` }} /></span><span>{score.parts[k]}</span></li>
         ))}
@@ -37,7 +38,7 @@ function ScoreBlock({ score, office }: { score: NonNullable<PlanResult['score']>
   );
 }
 
-export function PlanCard(props: { plan: PlanResult; budgetCents: number; scenarios: string[]; onChoose: () => void }) {
+export function PlanCard(props: { plan: PlanResult; budgetCents: number; scenarios: string[]; onChoose: (plan: PlanResult) => void }) {
   return props.plan.infeasible ? <InfeasibleCard {...props} /> : <FeasibleCard {...props} />;
 }
 
@@ -70,7 +71,7 @@ function InfeasibleCard({ plan, budgetCents }: { plan: PlanResult; budgetCents: 
   );
 }
 
-function FeasibleCard({ plan, budgetCents, scenarios, onChoose }: { plan: PlanResult; budgetCents: number; scenarios: string[]; onChoose: () => void }) {
+function FeasibleCard({ plan, budgetCents, scenarios, onChoose }: { plan: PlanResult; budgetCents: number; scenarios: string[]; onChoose: (plan: PlanResult) => void }) {
   const [showNotes, setShowNotes] = useState(false);
   const PlanIcon = PLAN_ICONS[plan.id];
   const bySlot = new Map(plan.picks.map(p => [API_TO_SLOT[p.slot], p]));
@@ -117,15 +118,36 @@ function FeasibleCard({ plan, budgetCents, scenarios, onChoose }: { plan: PlanRe
         })}
       </ul>
 
-      <p className={`nx-compat ${summary.level}`}><StatusIcon size={16} /> {summary.text}</p>
+      <p className={`nx-compat ${summary.level}`}><StatusIcon size={16} /> {plan.compatibility?.overall} · {summary.text}</p>
+      {plan.picks.some(p => p.item.productStatus && p.item.productStatus !== 'new') && (
+        <p className="nx-compat error" role="note">
+          <AlertTriangle size={16} /> 含非全新 / 非原厂商品：{plan.picks.filter(p => p.item.productStatus && p.item.productStatus !== 'new')
+            .map(p => `${p.item.name}（${({ new: '全新', used: '二手', refurbished: '翻新', modified: '改装', engineering_sample: '工程样品', unknown: '状态未知' } as const)[p.item.productStatus!]}：${p.item.productStatusReason ?? ''}）`).join('；')}。无原厂保修，稳定性、功耗与规格需自行核实。
+        </p>
+      )}
+      {plan.recommendationStatus && <p className="nx-muted">{{ feasible: '已确认可行推荐', conditional: '条件通过，需满足指定条件', verification_required: '数据不足，待核实方案', degraded: '未达到最低使用需求的降级方案', over_budget_alternative: '超预算替代方案', infeasible: '无可行推荐' }[plan.recommendationStatus]}</p>}
       {(userPriced > 0 || stalePriced > 0) && <p className="nx-plan-budget" title="价格来源：我的价格来自“价格管理”里的记录，其余为中关村参考价或估算（非实时）">
         {userPriced > 0 && `${userPriced} 件用我的价格`}{userPriced > 0 && stalePriced > 0 && ' · '}{stalePriced > 0 && <span className="nx-stale">{stalePriced} 件价格超过有效期</span>}
       </p>}
+      {plan.corePerformance?.benchmark && <p className="nx-muted"><a href={plan.corePerformance.benchmark.sourceUrl} target="_blank" rel="noreferrer">{plan.corePerformance.benchmark.title ?? plan.corePerformance.benchmark.game ?? plan.corePerformance.benchmark.id}</a> · {plan.corePerformance.benchmark.value} {plan.corePerformance.benchmark.unit}</p>}
+      {plan.corePerformance?.proxy && plan.corePerformance.metric != null && <p className="nx-muted">{plan.corePerformance.proxy} {plan.corePerformance.metric} · 性能代理</p>}
+      {plan.assessment && <ul className="nx-plan-reasons">
+        <li>预算 {plan.assessment.budget === 'met' ? '满足' : '超出'} · 需求 {{ met: '满足', unmet: '未达到', unverified: '待核实' }[plan.assessment.requirements]}</li>
+        <li>安装 {plan.assessment.physical} · 安全 {plan.assessment.safety}{plan.assessment.needsConfirmation ? ' · 需核对' : ''}</li>
+        {plan.unmetRequirements?.length ? <li>未达到 {plan.unmetRequirements.join('、')}</li> : null}
+      </ul>}
+      {plan.upgrades?.length ? <details className="nx-notes"><summary>预算内升级选项</summary><ul>{plan.upgrades.map(option => (
+        <li key={option.picks.map(p => p.item.id).join('|')}>
+          {option.picks.find(p => p.slot === 'GPU')?.item.name ?? option.picks[0]?.item.name} · {formatYuan(option.totalCents)} · {option.compatibility?.overall}
+          <p>{option.reason}</p>
+          <button type="button" className="nx-link" onClick={() => onChoose({ ...option, budgetCents, lockedCents: 0, notes: [option.reason] })}>查看并编辑此配置</button>
+        </li>
+      ))}</ul></details> : null}
       {plan.score && <ScoreBlock score={plan.score} office={scenarios.includes('office')} />}
 
       {plan.peripherals && plan.peripherals.picks.length > 0 && (
         <div className="nx-plan-peripherals" title={plan.peripherals.picks.map(p => `${p.item.name}：${p.reason}`).join('\n')}>
-          <span>外设 <strong>+{formatYuan(plan.peripherals.totalCents)}</strong><small>不占主机预算</small></span>
+          <span>外设 <strong>{formatYuan(plan.peripherals.totalCents)}</strong><small>已计入预计总价与预算</small></span>
           <ul>
             {plan.peripherals.picks.map(pick => {
               const id = API_TO_SLOT[pick.slot];
@@ -147,7 +169,7 @@ function FeasibleCard({ plan, budgetCents, scenarios, onChoose }: { plan: PlanRe
         </ul>}
       </div>
 
-      <button type="button" className={`nx-btn ${plan.id === 'balanced' ? 'nx-btn-primary' : 'nx-btn-outline'} nx-btn-block`} onClick={onChoose}>
+      <button type="button" className={`nx-btn ${plan.id === 'balanced' ? 'nx-btn-primary' : 'nx-btn-outline'} nx-btn-block`} onClick={() => onChoose(plan)}>
         <Pencil size={16} /> 编辑这套
       </button>
     </article>

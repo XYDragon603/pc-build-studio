@@ -126,7 +126,7 @@ export interface Part {
   priceCents: number | null;
   quantity: number;
   /** estimate：按目录参考价估算，计入合计但单独标注 */
-  priceSource: 'manual' | 'demo' | 'estimate';
+  priceSource: 'manual' | 'demo' | 'estimate' | 'verified' | 'historical';
   /** 对应的型号目录 ID，用于刷新估算价 */
   catalogId?: string | null;
   note: string;

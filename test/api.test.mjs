@@ -70,7 +70,7 @@ test('配置 API 保存与重读整单，保护锁定槽位和并发编辑', asy
   assert.equal((await request(path)).status, 404);
 });
 
-test('外设是可选槽位：可以保存，单独计价，不占主机预算', async t => {
+test('外设是可选槽位：可保存并单独列价，费用计入总预算余额', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'pc-api-test-'));
   const request = await listen(t, directory);
   t.after(async () => {
@@ -86,7 +86,7 @@ test('外设是可选槽位：可以保存，单独计价，不占主机预算',
   const saved = (await request('/builds/' + demo.id, 'PUT', { ...input, version: demo.version })).data;
   assert.equal(saved.slots.find(slot => slot.id === 'MONITOR').label, '显示器');
   assert.deepEqual([saved.totals.totalCents, saved.totals.peripheralCents, saved.totals.grandTotalCents, saved.totals.remainingCents],
-    [394400, 132800, 527200, 405600]);
+    [394400, 132800, 527200, 272800]);
   assert.equal(saved.totals.filledStandardSlots, demo.totals.filledStandardSlots);
   // 外设类目没有兼容条件：配件库照常带 fit={} 查询，不报错；带了条件才报错
   assert.equal((await request('/catalog?category=MONITOR&fit=%7B%7D')).status, 200);
@@ -546,6 +546,7 @@ test('目录按市场筛选，自动方案与推荐只使用国内条目', async
   const planPicks = plans.data.plans.flatMap(plan => [...plan.picks, ...(plan.partialPicks ?? [])]);
   assert.ok(planPicks.every(pick => pick.item.market === 'cn'));
   const recommendation = await request('/recommend', 'POST', input);
-  assert.ok(recommendation.data.picks.some(pick => pick.item.id === 'zol-domestic'));
-  assert.ok(recommendation.data.picks.every(pick => pick.item.market === 'cn'));
+  assert.ok(recommendation.data.infeasible && recommendation.data.reasons.length);
+  assert.ok(recommendation.data.partialPicks.some(pick => pick.item.id === 'zol-domestic'));
+  assert.ok(recommendation.data.partialPicks.every(pick => pick.item.market === 'cn'));
 });

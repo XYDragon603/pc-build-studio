@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cpuKey, gpuKey } from './perfkeys.mjs';
+import { loadScenarioPerformance } from './scenario-performance.mjs';
 
 function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, 'utf8')); }
@@ -12,6 +13,7 @@ function readJson(file, fallback) {
 export function loadPerformance(directory, dataFile = new URL('../data/perf-gaming.json', import.meta.url)) {
   const blender = directory === null ? null : readJson(join(directory, 'blender-scores.json'), null);
   const gaming = readJson(dataFile, { cpu: null, gpu: null });
+  const scenario = loadScenarioPerformance(directory);
   const index = list => new Map((list ?? []).map(r => [r.key, r]));
   const blenderCpu = index(blender?.cpus);
   const blenderGpu = index(blender?.gpus);
@@ -19,7 +21,8 @@ export function loadPerformance(directory, dataFile = new URL('../data/perf-gami
   const gamingGpu = index(gaming.gpu?.entries);
 
   const meta = {
-    blender: blender ? { source: blender.source, url: blender.url, license: blender.license, version: blender.blenderVersion, snapshot: blender.snapshot } : null,
+    scenarioCohorts: scenario.metadata,
+    blender: blender ? { source: blender.source, url: blender.url, license: blender.license, version: blender.blenderVersion, snapshot: blender.snapshot, snapshotGeneratedAt: blender.generatedAt ?? null } : null,
     gamingCpu: gaming.cpu ? { source: gaming.cpu.source, url: gaming.cpu.url, resolution: gaming.cpu.resolution, baseline: gaming.cpu.baseline, date: gaming.cpu.date } : null,
     gamingGpu: gaming.gpu ? { source: gaming.gpu.source, url: gaming.gpu.url, resolution: gaming.gpu.resolution, baseline: gaming.gpu.baseline, date: gaming.gpu.date } : null,
   };
@@ -54,13 +57,16 @@ export function loadPerformance(directory, dataFile = new URL('../data/perf-gami
         if (base) g = { ...base, label: `按 ${key.replace(/ D$/, '')} 计` };
       }
     }
-    if (!b && !g) return variantNote ? { ...item, performance: { key, blender: null, gaming: null, note: variantNote } } : item;
+    const benchmarks = item.category === 'GPU' && key ? scenario.forGpu(key, item.specs?.capacityGB) : [];
+    if (!b && !g && !benchmarks.length) return variantNote ? { ...item, performance: { key, blender: null, gaming: null, note: variantNote } } : item;
     return {
       ...item,
       performance: {
         key,
-        blender: b ? { score: b.score, runs: b.runs, api: b.api } : null,
-        gaming: g ? { index: g.relative, label: g.label ?? null } : null,
+        ...item.performance,
+        ...(benchmarks.length ? { benchmarks } : {}),
+        blender: b ? { score: b.score, runs: b.runs, api: b.api, sourceUrl: blender.url, snapshotGeneratedAt: blender.generatedAt ?? null } : null,
+        gaming: g ? { index: g.relative, label: g.label ?? null, sourceUrl: (item.category === 'CPU' ? gaming.cpu : gaming.gpu)?.url ?? null, observedAt: (item.category === 'CPU' ? gaming.cpu : gaming.gpu)?.date ?? null, confidence: g.estimated ? 'low' : g.converted ? 'medium' : 'medium' } : null,
         ...(variantNote ? { note: variantNote } : {}),
       },
     };

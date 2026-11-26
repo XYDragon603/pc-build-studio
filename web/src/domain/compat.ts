@@ -74,7 +74,7 @@ export function compatibility(b: Build): Check[] {
     if (!part || (slot === 'gpu' && igpu) || (slot === 'cooler' && stockCooler)) continue;
     parts[key] = { name: part.name, specs: part.specs as Record<string, unknown> };
   }
-  const checks: Check[] = evaluateBuild(parts, { igpu, stockCooler })
+  const checks: Check[] = evaluateBuild(parts, { igpu, stockCooler, workload: { quiet: b.scenarios.includes('quiet') } })
     .filter(c => c.status !== 'NOT_APPLICABLE')
     // 还没选显卡时，“电源功率”没法估算，换成更明确的提示
     .filter(c => !(c.id === 'psuWatts' && !b.slots.gpu.part && !igpu))

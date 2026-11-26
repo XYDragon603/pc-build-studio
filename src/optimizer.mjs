@@ -9,9 +9,16 @@
 //   F. 每档求“评分 − 花钱惩罚”最大的组合；预算越高的档位评分不会更低
 //   G. 提升不明显的档位沿用上一档并说明；给出各档之间的升级说明与剩余预算的去向
 // 搜索规模受控（候选数上限 + 部分总价剪枝），不对全量配件做笛卡尔积。
-import { biosSupport, cpuHasIgpu, CONDITIONAL, evaluateBuild, FAIL, overallStatus, PASS, powerEstimate, UNKNOWN } from './compat-rules.mjs';
+import { biosSupport, cpuHasIgpu, CONDITIONAL, evaluateBuild, FAIL, gpuPowerCheck, overallStatus, PASS, powerEstimate, UNKNOWN } from './compat-rules.mjs';
 import { cpuKey } from './perfkeys.mjs';
-import { CPU_BALANCE, LEGACY_TRUST_PENALTY, MIN_REQUIREMENTS, MIN_TIER_GAIN, QUIET_NOISE_WEIGHT, SCORING_PROFILES, SCORING_VERSION, TIER_COST_PENALTY } from './scoring-profiles.mjs';
+import { CPU_BALANCE, LEGACY_TRUST_PENALTY, MIN_REQUIREMENTS, QUIET_NOISE_WEIGHT, SCORING_PROFILES, SCORING_VERSION } from './scoring-profiles.mjs';
+import { boardCaseStatus, coolerSizeClass, coolingClassFor, supportedBoardFormats, sustainedPower, stockCooler } from './hardware-specs.mjs';
+import { riskSummary } from './compat-rules.mjs';
+import { validateWorkload, workloadProfile } from './workloads.mjs';
+import { STRATEGIES, corePerformance, selectionValue, selectBuild, strongerOptions } from './recommendation-strategy.mjs';
+import { matchingBenchmark } from './scenario-performance.mjs';
+import { recommendPeripherals } from './peripherals.mjs';
+import { productStatus, statusAllowed } from './product-status.mjs';
 
 export const SLOTS = ['CPU', 'GPU', 'MOTHERBOARD', 'RAM', 'SSD', 'PSU', 'CASE', 'COOLER'];
 const PLATFORMS = /^(AM5|AM4|LGA1700|LGA1851)$/;
@@ -38,21 +45,23 @@ function saneItems(items, category, bucket) {
 }
 
 /** Pareto：按价格升序，只留性能比所有更便宜候选都高的（价格更高但性能不更好的去掉）；过多时均匀抽样，保留两端 */
-function paretoByPrice(list, metric, max = 14) {
-  const sorted = [...list].sort((a, b) => price(a) - price(b) || metric(b) - metric(a));
+function paretoByPrice(list, metric, max = 14, audit = [], cost = price) {
+  const sorted = [...list].sort((a, b) => cost(a) - cost(b) || metric(b) - metric(a));
   const front = [];
   let best = -Infinity;
-  for (const c of sorted) if (metric(c) > best) { front.push(c); best = metric(c); }
+  for (const c of sorted) if (metric(c) > best) { front.push(c); best = metric(c); } else audit.push({ id: c.id, reason: 'price-performance-dominated', dominatedBy: front.at(-1)?.id });
   if (front.length <= max) return front;
   const step = (front.length - 1) / (max - 1);
-  return [...new Set(Array.from({ length: max }, (_, k) => front[Math.round(k * step)]))];
+  const kept = [...new Set(Array.from({ length: max }, (_, k) => front[Math.round(k * step)]))];
+  for (const i of front.filter(i => !kept.includes(i))) audit.push({ id: i.id, reason: 'search-width-top-k', limit: max });
+  return kept;
 }
 
 const gpuGroupKey = i => `${up(i.specs.chipset).replace(/^(GEFORCE|RADEON)\s*/, '')} ${i.specs.capacityGB}GB`;
 const isNvidiaRtx = i => /RTX/i.test(i.specs.chipset ?? '');
 const aiReady = i => /RTX\s*[345]\d{3}/i.test(i.specs.chipset ?? '');
 
-function cpuCandidates(items, profile, { igpu, locked }) {
+function cpuCandidates(items, profile, { igpu, locked, audit = [] }) {
   if (locked.CPU) return [locked.CPU];
   const pool = saneItems(items, 'CPU', i => up(i.specs.socket)).filter(i => PLATFORMS.test(up(i.specs.socket)) && (!igpu || cpuHasIgpu(i.name, i.specs)));
   // 同一型号（盒装 / 散片等）取最便宜的一条
@@ -65,7 +74,10 @@ function cpuCandidates(items, profile, { igpu, locked }) {
   const metric = cpuMetric(profile);
   const measured = models.filter(i => metric(i) != null);
   // 没有性能数据的不靠价格冒充性能：有足够带数据的候选时不考虑它们
-  if (measured.length >= 3) return paretoByPrice(measured, metric);
+  if (measured.length >= 3) {
+    const sockets = [...new Set(measured.map(i => i.specs.socket))];
+    return sockets.flatMap(socket => paretoByPrice(measured.filter(i => i.specs.socket === socket), metric, 6, audit));
+  }
   return [...models].sort((a, b) => price(a) - price(b)).slice(0, 14);
 }
 
@@ -74,12 +86,12 @@ const cpuMetric = profile => (profile.cpuMetric === 'gaming'
   : i => i.performance?.blender?.score ?? null);
 
 function gpuMetric(profile) {
-  if (profile.gpuMetric === 'ai') return i => (aiReady(i) && i.performance?.blender ? i.specs.capacityGB * 1000 + i.performance.blender.score / 10 : null);
+  if (profile.gpuMetric === 'ai') return i => (aiReady(i) && i.performance?.blender ? Math.log2(1 + i.specs.capacityGB / 12) * Math.sqrt(i.performance.blender.score) : null);
   if (profile.gpuMetric === 'creator') return i => (isNvidiaRtx(i) && i.specs.capacityGB >= 8 && i.performance?.blender ? i.performance.blender.score : null);
   return i => i.performance?.gaming?.index ?? null;
 }
 
-function gpuCandidates(items, profile, { locked, allowIgpu }) {
+function gpuCandidates(items, profile, { locked, allowIgpu, audit = [], workload }) {
   if (locked.GPU) return [locked.GPU];
   if (profile.gpuMetric === 'none') return [null];
   const pool = saneItems(items, 'GPU', gpuGroupKey).filter(i => i.specs.chipset && i.specs.capacityGB && (i.specs.lengthMm ?? 0) >= 150 && i.specs.lengthMm <= 380);
@@ -90,11 +102,34 @@ function gpuCandidates(items, profile, { locked, allowIgpu }) {
     const m = median(list.map(price));
     const sane = list.filter(i => price(i) >= m * 0.75);
     const complete = sane.filter(i => i.specs.powerPins);
-    return [...(complete.length ? complete : sane.length ? sane : list)].sort((a, b) => price(a) - price(b))[0];
+    const chosen = [...(complete.length ? complete : sane.length ? sane : list)].sort((a, b) => price(a) - price(b) || a.id.localeCompare(b.id))[0];
+    for (const i of list.filter(i => i !== chosen)) audit.push({ id: i.id, reason: 'same-chip-vram-representative', representative: chosen.id });
+    return chosen;
   });
   const metric = gpuMetric(profile);
-  const measured = reps.filter(i => metric(i) != null);
-  const front = measured.length >= 3 ? paretoByPrice(measured, metric, 16) : reps.sort((a, b) => price(a) - price(b)).slice(0, 16);
+  // 2.2.1：先剔除“无法组成整机”的显卡，再做支配裁剪；支配比较用“显卡 + 能带动它的最便宜电源”的价格。
+  // 2.2.0 在兼容性检查之前按显卡单价做 Pareto：一张没有任何电源能供电（或没有机箱装得下）的便宜高分卡，
+  // 会把真正可装的卡裁掉（合成目录穷举测试 01 复现：四 8pin 的 5080 裁掉了 5070 Ti）。
+  const psus = items.filter(i => i.category === 'PSU' && i.specs.ratedWatts && price(i) > 0);
+  const caseLimits = items.filter(i => i.category === 'CASE').map(i => i.specs.maxGpuLengthMm).filter(Boolean);
+  const effective = new Map();
+  const buildable = reps.filter(g => {
+    const need = powerEstimate({ maxPowerWatts: 120 }, g.specs, {}).selectionMinimum;
+    const options = psus.filter(u => u.specs.ratedWatts >= need && gpuPowerCheck(g.specs, u.specs).status !== FAIL);
+    if (!options.length) { audit.push({ id: g.id, reason: 'no-psu-can-power', detail: `没有电源同时满足 ≥${need}W 与显卡供电接口` }); return false; }
+    if (caseLimits.length && g.specs.lengthMm && !caseLimits.some(l => l >= g.specs.lengthMm + 10)) { audit.push({ id: g.id, reason: 'no-case-fits', detail: `没有机箱容纳 ${g.specs.lengthMm}mm 显卡` }); return false; }
+    effective.set(g.id, price(g) + Math.min(...options.map(price)));
+    return true;
+  });
+  const cost = g => effective.get(g.id) ?? price(g);
+  const measured = buildable.filter(i => metric(i) != null);
+  const ai = profile.gpuMetric === 'ai';
+  const nondominated = ai ? measured.filter(i => !measured.some(j => cost(j) <= cost(i) && j.specs.capacityGB >= i.specs.capacityGB && j.performance.blender.score >= i.performance.blender.score && (cost(j) < cost(i) || j.performance.blender.score > i.performance.blender.score || j.specs.capacityGB > i.specs.capacityGB))) : null;
+  if (ai) for (const i of measured.filter(i => !nondominated.includes(i))) audit.push({ id: i.id, reason: 'price-vram-compute-dominated' });
+  const front = measured.length >= 3 ? ai ? nondominated.sort((a, b) => cost(a) - cost(b)).slice(0, 24) : paretoByPrice(measured, metric, 20, audit, cost) : buildable.sort((a, b) => cost(a) - cost(b)).slice(0, 20);
+  for (const i of reps.filter(i => matchingBenchmark(i, workload))) if (!front.includes(i)) front.push(i);
+  for (const i of reps.filter(i => metric(i) == null)) audit.push({ id: i.id, reason: 'missing-performance-or-workload-support' });
+  if (ai) for (const i of nondominated.filter(i => !front.includes(i))) audit.push({ id: i.id, reason: 'search-width-top-k', limit: 24 });
   // 游戏用途在预算很低时也评估核显（显卡分很低，只有放不下独显时才会被选）
   return allowIgpu ? [null, ...front] : front;
 }
@@ -193,76 +228,106 @@ export function psuQuality(s) {
   return clamp(q);
 }
 
-function makeCompleter(items, { igpu, quiet, locked }) {
+function makeCompleter(items, { igpu, quiet, locked, workload = {}, diagnostics }) {
   const psus = saneItems(items, 'PSU', i => String(Math.round((i.specs.ratedWatts ?? 0) / 100) * 100)).filter(i => i.specs.ratedWatts);
   const coolers = saneItems(items, 'COOLER', i => (i.specs.radiatorSizeMm ? `liquid:${i.specs.radiatorSizeMm}` : 'air'));
   const cases = saneItems(items, 'CASE', () => 'all').filter(i => i.specs.maxGpuLengthMm);
+  // 目录里有整机实测的机箱才可能 PASS；否则风道依据最好只能是 CONDITIONAL（提前停止用）
+  const bestAirflowRank = cases.some(i => i.specs.thermalTests?.length) ? 0 : 1;
   const memo = new Map();
   const cached = (key, fn) => { if (!memo.has(key)) memo.set(key, fn()); return memo.get(key); };
+  const rejected = (item, type, reason) => {
+    if (!diagnostics) return;
+    diagnostics[type] = (diagnostics[type] ?? 0) + 1;
+    const key = `${item.id}|${reason}`;
+    const record = diagnostics.records[key] ?? { id: item.id, name: item.name, priceCents: price(item), type, reason, occurrences: 0 };
+    record.occurrences++; diagnostics.records[key] = record;
+  };
 
   /** 电源：功率 ≥ 需求；供电接口、12V 不能 FAIL；按负载设品质下限（高负载要金牌级、ATX 3.x 更好），满足的里面挑最便宜 */
   function psu(cpu, gpu) {
     if (locked.PSU) return locked.PSU;
     const g = gpu?.specs ?? {};
     const p = powerEstimate(cpu.specs, igpu ? null : g, { igpu });
-    const need = Math.max(p.recommended ?? 0, igpu ? 300 : 450);
+    const need = p.selectionMinimum;
     const pinsKey = JSON.stringify(g.powerPins ?? null);
     const key = `psu|${need}|${pinsKey}|${p.gpuW}|${p.cpuW}|${quiet}`;
     return cached(key, () => {
       const graded = psus.filter(i => i.specs.ratedWatts >= need).map(i => {
         const checks = evaluateBuild({ CPU: { specs: cpu.specs }, GPU: igpu || !gpu ? null : { specs: g }, PSU: { specs: i.specs } }, { igpu })
           .filter(c => ['gpuPower', 'psu12v', 'psuWatts'].includes(c.id));
-        const rank = Math.max(0, ...checks.map(c => (c.status === FAIL ? 9 : c.status === UNKNOWN ? 2 : c.status === CONDITIONAL ? 1 : 0)));
+        // 高功耗（显卡 ≥250W）时，电源长度未知会让机箱的电源长度检查成为阻断项：同等条件下优先长度已知的电源
+        // 电源规格（ATX / SFX）未知时机箱的电源规格检查是阻断项（不论功耗）：同样优先规格已知的电源
+        const lengthUnknown = ((p.gpuW ?? 0) >= 250 && !i.specs.psuLengthMm) || !i.specs.psuFormFactor ? 2 : 0;
+        const rank = Math.max(lengthUnknown, ...checks.map(c => (c.status === FAIL ? 9 : c.status === UNKNOWN ? 2 : c.status === CONDITIONAL ? 1 : 0)));
         return { item: i, rank, q: psuQuality(i.specs) };
-      }).filter(x => x.rank < 9);
+      }).filter(x => { if (x.rank >= 9) rejected(x.item, 'specification', '电源接口、额定功率或 12V 检查失败'); return x.rank < 9; });
       if (!graded.length) return null;
       const load = p.load ?? need / 1.25;
       const floor = (load > 500 ? 0.55 : load > 300 ? 0.4 : 0.15) + (quiet ? 0.12 : 0);
-      const bestRank = Math.min(...graded.map(x => x.rank));
-      const ranked = graded.filter(x => x.rank === bestRank);
-      const ok = ranked.filter(x => x.q >= floor).sort((a, b) => price(a.item) - price(b.item))[0];
-      return (ok ?? ranked.sort((a, b) => b.q - a.q || price(a.item) - price(b.item))[0]).item;
+      for (const x of graded.filter(x => x.q < floor)) rejected(x.item, 'quality', `供电品质 ${x.q.toFixed(2)} 低于当前负载下限 ${floor.toFixed(2)}`);
+      const eligible = graded.filter(x => x.q >= floor);
+      if (!eligible.length) return null;
+      const bestRank = Math.min(...eligible.map(x => x.rank));
+      return eligible.filter(x => x.rank === bestRank).sort((a, b) => price(a.item) - price(b.item))[0].item;
     });
   }
 
   /** 散热：按 CPU 持续功耗要求散热能力；合格风冷可参与；AMD 盒装非 X 型号低预算可用原装散热 */
-  function cooler(cpu) {
+  function cooler(cpu, board) {
     if (locked.COOLER) return locked.COOLER;
-    const peak = cpu.specs.maxPowerWatts ?? 120;
-    const stockOk = !quiet && /盒/.test(cpu.specs.packaging ?? '') && /RYZEN/i.test(cpu.name ?? '') && !/\d{4}X/i.test(cpu.name ?? '') && peak <= 95;
-    const key = `cooler|${up(cpu.specs.socket)}|${Math.ceil(peak / 30)}|${quiet}|${stockOk}`;
+    const peak = sustainedPower(cpu.specs, board?.specs, workload);
+    const stockOk = !quiet && peak > 0 && peak <= 95 && stockCooler(cpu);
+    const key = `cooler|${cpu.id}|${peak}|${quiet}|${stockOk}`;
     return cached(key, () => {
       if (stockOk) return 'STOCK';
-      const fits = coolers.filter(c => evaluateBuild({ CPU: { specs: { socket: cpu.specs.socket } }, COOLER: { specs: c.specs } }).find(x => x.id === 'coolerSocket')?.status === PASS);
-      // 散热能力用尺寸作近似：冷排越大、塔越高越强（没有统一的散热功率数据）
-      const capable = c => {
-        const r = c.specs.radiatorSizeMm ?? 0; const h = c.specs.heightMm ?? 0;
-        if (peak <= 120) return r > 0 || h >= 120;
-        if (peak <= 180) return r >= 240 || h >= 145;
-        if (peak <= 250) return r >= 240 || h >= 155;
-        return r >= 280 || h >= 158;
-      };
-      const quietOk = c => !quiet || (c.specs.radiatorSizeMm ?? 0) >= 240 || (c.specs.heightMm ?? 0) >= 150;
-      const ok = fits.filter(c => capable(c) && quietOk(c)).sort((a, b) => price(a) - price(b));
-      return ok[0] ?? fits.filter(capable).sort((a, b) => price(a) - price(b))[0] ?? null;
+      const fits = coolers.filter(c => { const fit = evaluateBuild({ CPU: { specs: { socket: cpu.specs.socket } }, COOLER: { specs: c.specs } }).find(x => x.id === 'coolerSocket')?.status === PASS; if (!fit) rejected(c, 'specification', `没有确认支持 CPU 插槽 ${cpu.specs.socket}`); return fit; });
+      // 证据等级：同平台持续实测 0 > 有来源的厂商标称 1 > 无 2。
+      // 2.2.1：证据等级只在价格相同时区分。2.2.0 先按证据等级排序再比价格，而全目录只有 2 款散热器有厂商标称，
+      // 玄冰500（¥99）因此在 36 套测试里全部入选，与 CPU 热负载无关。
+      const rank = c => c.specs.thermalTests?.some(t => t.kind === 'measured' && /^https:\/\//.test(t.sourceUrl ?? '') && t.cpuSocket === cpu.specs.socket && t.durationMinutes >= 20 && t.ambientC >= (workload.ambientC ?? 25) && t.maxTempC <= t.tempLimitC && t.powerWatts >= peak && (!quiet || t.noiseDbA <= 35)) ? 0
+        : c.specs.vendorCoolingWatts >= peak && c.specs.coolingEvidence?.sourceUrl ? 1 : 2;
+      // 能力：厂商标称已知时须 ≥ 负载；尺寸档须 ≥ 负载所需（未知功耗按 120W 档）；安静优先再高一档
+      const need = Math.min(4, coolingClassFor(peak ?? 120) + (quiet ? 1 : 0));
+      const capable = fits.filter(c => {
+        if (c.specs.vendorCoolingWatts && c.specs.vendorCoolingWatts < (peak ?? 0)) { rejected(c, 'quality', `厂商标称 ${c.specs.vendorCoolingWatts}W 低于待校核 ${peak}W`); return false; }
+        if (coolerSizeClass(c.specs) < need) { rejected(c, 'quality', `尺寸档 ${coolerSizeClass(c.specs)} 低于 ${peak ?? '未知'}W${quiet ? '（安静优先）' : ''} 所需的 ${need} 档`); return false; }
+        return true;
+      });
+      const pool = capable.length ? capable : fits.filter(c => coolerSizeClass(c.specs) >= coolingClassFor(peak ?? 120));
+      return pool.sort((a, b) => price(a) - price(b) || rank(a) - rank(b) || a.id.localeCompare(b.id))[0] ?? null;
     });
   }
 
   /** 机箱：装得下主板、显卡（留 10mm）、散热器 / 冷排；没有风道数据，不按价格当品质——满足条件里最便宜 */
-  function pcCase(board, gpu, cool) {
+  function pcCase(cpu, board, gpu, cool, psu) {
     if (locked.CASE) return locked.CASE;
-    const size = BOARD_RANK[up(board.specs.formFactor)] ?? 2;
     const len = igpu || !gpu ? 0 : gpu.specs.lengthMm ?? 0;
     const c = cool && cool !== 'STOCK' ? cool.specs : {};
-    const key = `case|${size}|${Math.ceil(len / 10)}|${c.radiatorSizeMm ?? 0}|${Math.ceil((c.heightMm ?? 0) / 5)}`;
-    return cached(key, () => cases.filter(i => {
-      const max = BOARD_RANK[up(i.specs.maxBoardFormFactor)] ?? (/MICRO ATX/i.test(i.specs.formFactor ?? '') ? 2 : /ATX/i.test(i.specs.formFactor ?? '') ? 3 : null);
-      if (!max || max < size) return false;
-      if (len && i.specs.maxGpuLengthMm < len + 10) return false;
-      if (c.radiatorSizeMm) return (i.specs.maxRadiatorMm ?? 0) >= c.radiatorSizeMm;
-      if (c.heightMm) return (i.specs.maxCoolerHeightMm ?? 0) >= c.heightMm;
+    const key = `case|${cpu.id}|${board.id}|${gpu?.id}|${cool?.id ?? cool}|${psu.id}|${quiet}`;
+    // 静态尺寸筛选只取决于主板与尺寸，单独缓存并按价格排序（2.2.1 性能：原来每个组合都对全部机箱重算）
+    const fitKey = `casefit|${board.id}|${len}|${c.radiatorSizeMm ?? 0}|${c.heightMm ?? 0}`;
+    const fitting = cached(fitKey, () => cases.filter(i => {
+      if (boardCaseStatus(board.specs, i.specs) !== PASS) { rejected(i, 'specification', '主板板型冲突或没有明确的支持规格集合'); return false; }
+      if (len && i.specs.maxGpuLengthMm < len + 10) { rejected(i, 'specification', '显卡长度加 10mm 安装余量超过机箱限长'); return false; }
+      if (c.radiatorSizeMm && (i.specs.maxRadiatorMm ?? 0) < c.radiatorSizeMm) { rejected(i, 'specification', '冷排不满足机箱支持上限'); return false; }
+      if (!c.radiatorSizeMm && c.heightMm && (i.specs.maxCoolerHeightMm ?? 0) < c.heightMm) { rejected(i, 'specification', '散热器高度不满足机箱上限'); return false; }
       return true;
-    }).sort((a, b) => price(a) - price(b))[0] ?? null);
+    }).sort((a, b) => price(a) - price(b) || a.id.localeCompare(b.id)));
+    // 排序（2.2.1）：阻断性待核实项数量 → 风道依据（实测 PASS / 工程判断 CONDITIONAL / 未知）→ 价格。
+    // 按价格从低到高评估，遇到“无阻断项且风道依据已达目录可能的最好等级”即停：与全量排序结果相同。
+    return cached(key, () => {
+      let best = null;
+      for (const item of fitting) {
+        const checks = evaluateBuild({ CPU: cpu, GPU: gpu, MOTHERBOARD: board, COOLER: cool === 'STOCK' ? null : cool, PSU: psu, CASE: item }, { igpu, stockCooler: cool === 'STOCK', workload: { ...workload, quiet } });
+        if (checks.some(x => x.status === FAIL)) { rejected(item, 'specification', '补齐电源、散热器、显卡后最终物理或供电检查失败'); continue; }
+        const thermal = checks.find(x => x.id === 'caseAirflow');
+        const cand = { item, blocking: checks.filter(x => x.blocking).length, rank: thermal?.status === PASS ? 0 : thermal?.status === CONDITIONAL ? 1 : 2 };
+        if (!best || cand.blocking < best.blocking || (cand.blocking === best.blocking && cand.rank < best.rank)) best = cand;
+        if (best.blocking === 0 && best.rank <= bestAirflowRank) break;
+      }
+      return best?.item ?? null;
+    });
   }
 
   return { psu, cooler, pcCase };
@@ -273,7 +338,7 @@ function makeCompleter(items, { igpu, quiet, locked }) {
 const CONF = { high: 1, medium: 0.7, low: 0.3 };
 
 function scoreBuild(b, ctx) {
-  const { profile, refs, quiet } = ctx;
+  const { profile, refs, quiet, workload = {}, profileKey: key } = ctx;
   const w = { ...profile.weights };
   if (quiet) {
     const extra = QUIET_NOISE_WEIGHT - w.noise;
@@ -288,36 +353,46 @@ function scoreBuild(b, ctx) {
   else if (!b.gpu) parts.gpu = 0.03;
   else if (profile.gpuMetric === 'ai') {
     const compute = b.gpu.performance?.blender?.score;
-    parts.gpu = 0.75 * clamp(b.gpu.specs.capacityGB / (profile.vramRefGB ?? 24)) + 0.25 * (compute ? clamp(compute / refs.gpuCompute) : 0.3);
+    // 2.2.1：恢复 2.1 的线性截断 + 开方（2.2.0 的 x/(x+0.25) 饱和曲线把 5060 Ti 与 5090 D 的差距压到很小，高预算选不到高端卡）
+    // AI：显存是“能否装下模型”的容量门槛，线性计分（不开方）；75% 显存（32GB 满分）+ 25% 算力
+    parts.gpu = 0.75 * clamp(b.gpu.specs.capacityGB / (profile.vramRefGB ?? 24)) + 0.25 * (compute ? clamp(compute / refs.gpuCompute) : 0);
   } else if (profile.gpuMetric === 'creator') {
     const compute = b.gpu.performance?.blender?.score;
-    parts.gpu = (compute ? clamp(compute / refs.gpuCompute) : 0.3) * (b.gpu.specs.capacityGB >= 12 ? 1 : 0.9);
+    parts.gpu = Math.sqrt((compute ? clamp(compute / refs.gpuCompute) : 0) * (b.gpu.specs.capacityGB >= 12 ? 1 : 0.9));
   } else {
     const idx = b.gpu.performance?.gaming?.index;
-    parts.gpu = idx ? clamp(idx / refs.gpuGaming) ** (profile.gpuCurve ?? 0.5) : 0.3;
+    parts.gpu = idx ? clamp(idx / refs.gpuGaming) ** (profile.gpuCurve ?? 0.7) : 0;
   }
-  if (profile.gpuMetric === 'ai' || profile.gpuMetric === 'creator') parts.gpu = Math.sqrt(clamp(parts.gpu));
+  const measuredScenario = b.benchmark;
+  if (measuredScenario) parts.gpu = measuredScenario.value / (measuredScenario.value + (measuredScenario.reference ?? 20));
   // CPU
   const cm = cpuMetric(profile)(b.cpu);
-  parts.cpu = cm != null ? Math.sqrt(clamp(cm / (profile.cpuMetric === 'gaming' ? refs.cpuGaming : refs.cpuBlender))) : 0.45;
+  const cpuRatio = cm / (profile.cpuMetric === 'gaming' ? refs.cpuGaming : refs.cpuBlender);
+  parts.cpu = cm != null ? Math.sqrt(clamp(cpuRatio)) : 0;
   // 内存、硬盘
   const ramGB = b.ram.specs.capacityGB ?? 0;
   parts.memory = clamp(Math.sqrt(ramGB / profile.ramGB)) * (profile.cpuMetric === 'gaming' && up(b.ram.specs.memoryType) === 'DDR5' && (b.ram.specs.speedMTs ?? 0) >= 6000 ? 1 : 0.95);
   parts.storage = 0.75 * clamp(Math.sqrt((b.ssd.specs.capacityGB ?? 0) / profile.ssdGB)) + 0.25 * ssdQuality(b.ssd);
   // 品质：电源、主板、散热余量
-  const coolerOk = b.cooler === 'STOCK' ? 0.6 : 0.9;
-  parts.quality = (psuQuality(b.psu.specs) + boardQuality(b.board) + coolerOk) / 3;
-  // 噪音：散热越强、电源能效越高越安静（没有实测分贝，按规格近似）
-  const coolerQuiet = b.cooler === 'STOCK' ? 0.35 : (b.cooler.specs.radiatorSizeMm ?? 0) >= 240 ? 0.85 : (b.cooler.specs.heightMm ?? 0) >= 150 ? 0.8 : 0.55;
-  parts.noise = (coolerQuiet + clamp(psuQuality(b.psu.specs) + 0.2)) / 2;
+  const evidenceScore = id => ({ PASS: 1, CONDITIONAL: .4, UNKNOWN: 0, FAIL: 0 })[b.checks.find(c => c.id === id)?.status] ?? 0;
+  parts.quality = (psuQuality(b.psu.specs) + boardQuality(b.board) + evidenceScore('cpuCooling') + evidenceScore('caseAirflow')) / 4;
+  // Only measured whole-build noise can earn a noise score. Fan vendor dBA
+  // cannot be added together or substituted for case/load measurements.
+  const noise = b.case.specs.thermalTests?.find(t => t.kind === 'measured' && t.sourceUrl && t.cpuWatts >= sustainedPower(b.cpu.specs, b.board.specs, workload) && t.gpuWatts >= (b.gpu?.specs.boardPowerWatts ?? b.gpu?.specs.tdpWatts ?? 0) && t.noiseDbA != null);
+  // 噪音分只来自整机实测（没有实测记 0，不用规格近似冒充测量）。“安静优先”通过补件器生效：散热器要求高一档、电源品质下限更高。
+  parts.noise = noise ? clamp((50 - noise.noiseDbA) / 25) : 0;
+  parts.balance = b.gpu && b.cpu.performance?.gaming ? clamp(b.cpu.performance.gaming.index / (CPU_BALANCE.base + CPU_BALANCE.perGpu * (b.gpu.performance?.gaming?.index ?? 0))) : .3;
+  parts.upgrade = ((b.board.specs.memorySlots ?? 0) > (b.ram.specs.modules ?? 0) ? .3 : 0) + ((b.board.specs.m2Slots ?? 0) > 1 ? .3 : 0) + (['AM5', 'LGA1851'].includes(up(b.board.specs.socket)) ? .4 : 0);
   // 数据可信度：价格可信度均值，兼容性条件项小扣分、待核实大扣分
   const items = [b.cpu, b.gpu, b.board, b.ram, b.ssd, b.psu, b.case, b.cooler === 'STOCK' ? null : b.cooler].filter(Boolean);
-  const conf = items.reduce((s, i) => s + (CONF[i.priceConfidence] ?? (i.locked ? 1 : 0.7)), 0) / items.length;
+  const conf = items.reduce((s, i) => s + (CONF[i.priceConfidence] ?? .3), 0) / items.length;
   const cond = b.checks.filter(c => c.status === CONDITIONAL).length;
   const unknownCritical = b.checks.filter(c => c.status === UNKNOWN && c.critical).length;
   const unknown = b.checks.filter(c => c.status === UNKNOWN && !c.critical).length;
   const legacy = items.filter(i => i.priceFlags?.includes('legacy')).length;
   parts.trust = clamp(conf - 0.03 * cond - 0.15 * unknownCritical - 0.05 * unknown - LEGACY_TRUST_PENALTY * legacy);
+  const proxy = !measuredScenario && key !== 'office';
+  if (proxy) parts.trust = Math.min(parts.trust, ['4k', 'ai', 'creator'].includes(key) ? .4 : .65);
   let total = 100 * Object.entries(w).reduce((s, [k, v]) => s + v * (parts[k] ?? 0), 0);
   // 游戏：CPU 拖后腿扣分（显卡越强，需要的 CPU 游戏指数越高）
   let bottleneck = 0;
@@ -327,6 +402,8 @@ function scoreBuild(b, ctx) {
     total -= bottleneck;
   }
   return { total: Math.round(total * 10) / 10, bottleneck: Math.round(bottleneck * 10) / 10,
+    scope: key, workload: workload.task, performanceBasis: measuredScenario ? '同一测试组的显卡型号实测，整机表现仍受搭配影响' : profile.gpuMetric === 'gaming' ? '2K 光栅指数代理；不代表 1080p FPS、4K 光追、超分或帧生成结果' : 'Blender 渲染代理；不代表剪辑编码、LLM 或训练吞吐', confidence: proxy ? 'low' : 'medium',
+    dimensions: { core: Math.round((parts.gpu * (profile.gpuMetric === 'none' ? 0 : .65) + parts.cpu * (profile.gpuMetric === 'none' ? 1 : .35)) * 100), balance: Math.round(parts.balance * 100), memoryStorage: Math.round((parts.memory + parts.storage) * 50), reliability: Math.round(parts.quality * 100), upgrade: Math.round(parts.upgrade * 100), noiseEfficiency: Math.round(parts.noise * 100), trust: Math.round(parts.trust * 100) },
     parts: Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, Math.round(v * 100)])) };
 }
 
@@ -343,14 +420,15 @@ function lockedItems(locked) {
  * 枚举并评估整机组合。返回可行组合列表（总价、评分、配件、兼容性），供各档挑选。
  * maxCostCents：部分总价剪枝上限。
  */
-export function enumerateBuilds(items, { scenarios = [], locked: lockedInput = {}, maxCostCents = Infinity, igpuOnly = false, allowIgpu = false }) {
+export function enumerateBuilds(items, { scenarios = [], locked: lockedInput = {}, maxCostCents = Infinity, igpuOnly = false, allowIgpu = false, workload = {} }) {
   const key = profileKey(scenarios);
-  const profile = SCORING_PROFILES[key];
+  const profile = workloadProfile(SCORING_PROFILES[key], key, workload);
   const quiet = scenarios.includes('quiet');
   const locked = lockedItems(lockedInput);
   const igpuLocked = !!lockedInput.GPU?.igpu;
-  const cpus = cpuCandidates(items, profile, { igpu: igpuOnly || igpuLocked, locked });
-  const gpus = igpuOnly || igpuLocked ? [null] : gpuCandidates(items, profile, { locked, allowIgpu });
+  const audit = [];
+  const cpus = cpuCandidates(items, profile, { igpu: igpuOnly || igpuLocked, locked, audit });
+  const gpus = igpuOnly || igpuLocked ? [null] : gpuCandidates(items, profile, { locked, allowIgpu, audit, workload });
   const boards = boardCandidates(items, { igpu: igpuOnly || igpuLocked || gpus.includes(null), locked });
   const rams = ramCandidates(items, profile, { locked });
   const ssds = ssdCandidates(items, profile, { locked });
@@ -363,9 +441,10 @@ export function enumerateBuilds(items, { scenarios = [], locked: lockedInput = {
     cpuBlender: top(cpus, c => c.performance?.blender?.score ?? 0),
   };
   // 核显 / 独显各一套补件器（电源需求、机箱显卡长度不同），内部按需求缓存
-  const completers = { true: makeCompleter(items, { igpu: true, quiet, locked }), false: makeCompleter(items, { igpu: false, quiet, locked }) };
+  const diagnostics = { quality: 0, specification: 0, records: {} };
+  const completers = { true: makeCompleter(items, { igpu: true, quiet, locked, workload, diagnostics }), false: makeCompleter(items, { igpu: false, quiet, locked, workload, diagnostics }) };
   const builds = [];
-  const stats = { candidates: { cpu: cpus.length, gpu: gpus.length, ram: [...rams.values()].flat().length, ssd: ssds.length }, combos: 0, completed: 0, rejectedFail: 0, incomplete: 0 };
+  const stats = { initialCandidates: Object.fromEntries(SLOTS.map(s => [s, items.filter(i => i.category === s).length])), candidates: { cpu: cpus.length, gpu: gpus.length, board: [...boards.values()].flat().length, ram: [...rams.values()].flat().length, ssd: ssds.length }, combos: 0, completed: 0, rejectedBudget: 0, rejectedFail: 0, incomplete: 0, rejectedByRule: {}, searchBounded: true, globalOptimalityProven: false };
   for (const cpu of cpus) {
     const socket = up(cpu.specs.socket);
     const boardList = locked.MOTHERBOARD ? boards.get('*') : boards.get(socket) ?? [];
@@ -379,26 +458,35 @@ export function enumerateBuilds(items, { scenarios = [], locked: lockedInput = {
         if (igpu && board.specs.videoOutputs === false) continue;
         const ramList = locked.RAM ? rams.get('*') : rams.get(up(board.specs.memoryType)) ?? [];
         const base = price(cpu) + price(board) + (gpu ? price(gpu) : 0);
-        if (base > maxCostCents) continue;
+        if (base > maxCostCents) { stats.rejectedBudget++; continue; }
         const { psu: pickPsu, cooler: pickCooler, pcCase } = completers[igpu];
-        const cool = pickCooler(cpu);
+        const cool = pickCooler(cpu, board);
         if (cool === null) { stats.incomplete++; continue; }
         const psu = pickPsu(cpu, gpu);
         if (!psu) { stats.incomplete++; continue; }
-        const pc = pcCase(board, gpu, cool);
+        const pc = pcCase(cpu, board, gpu, cool, psu);
         if (!pc) { stats.incomplete++; continue; }
-        const fixed = base + price(psu) + price(pc) + (cool === 'STOCK' ? 0 : price(cool));
+        const fanCost = pc.specs.requiredFanCostCents ?? 0;
+        const bracketCost = ['SFX', 'SFX-L'].includes(psu.specs.psuFormFactor) &&
+          !pc.specs.supportedPsuFormats?.includes(psu.specs.psuFormFactor) && !psu.specs.psuAtxBracketIncluded
+          ? pc.specs.requiredPsuBracketCostCents ?? 0 : 0;
+        const fixed = base + price(psu) + price(pc) + (cool === 'STOCK' ? 0 : price(cool)) + fanCost + bracketCost;
         for (const ram of ramList) {
           for (const ssd of ssds) {
             stats.combos++;
             const total = fixed + price(ram) + price(ssd);
-            if (total > maxCostCents) continue;
+            if (total > maxCostCents) { stats.rejectedBudget++; continue; }
             if (board.specs.m2Slots === 0 && /M\.2/i.test(ssd.specs.interface ?? '')) continue;
             const parts = { CPU: cpu, GPU: gpu, MOTHERBOARD: board, RAM: ram, SSD: ssd, PSU: psu, CASE: pc, COOLER: cool === 'STOCK' ? null : cool };
-            const checks = evaluateBuild(Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, v ? { name: v.name, specs: v.specs } : null])), { igpu, stockCooler: cool === 'STOCK' });
-            if (checks.some(c => c.status === FAIL)) { stats.rejectedFail++; continue; }
-            const b = { cpu, gpu, board, ram, ssd, psu, case: pc, cooler: cool, igpu, checks, total };
-            b.score = scoreBuild(b, { profile, refs, quiet });
+            const checks = evaluateBuild(Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, v ? { name: v.name, specs: v.specs } : null])), { igpu, stockCooler: cool === 'STOCK', workload: { ...workload, quiet } });
+            if (checks.some(c => c.status === FAIL)) { stats.rejectedFail++; for (const c of checks.filter(c => c.status === FAIL)) stats.rejectedByRule[c.id] = (stats.rejectedByRule[c.id] ?? 0) + 1; continue; }
+            const b = { cpu, gpu, board, ram, ssd, psu, case: pc, cooler: cool, igpu, checks, total, fanCost, bracketCost,
+              risk: riskSummary(checks) };
+            b.core = corePerformance(b, profile);
+            b.benchmark = matchingBenchmark(gpu, workload);
+            if (b.benchmark) b.core = { ...b.core, proxy: null, metric: b.benchmark.value,
+              value: Math.log1p(b.benchmark.value / (b.benchmark.reference ?? 20)), benchmark: b.benchmark };
+            b.score = scoreBuild(b, { profile, refs, quiet, workload, profileKey: key });
             builds.push(b);
             stats.completed++;
           }
@@ -406,7 +494,11 @@ export function enumerateBuilds(items, { scenarios = [], locked: lockedInput = {
       }
     }
   }
-  return { builds, profile, profileKey: key, stats };
+  const retained = new Set([...cpus, ...gpus, ...boards.values()].flat().filter(Boolean).map(i => i.id));
+  const candidateLog = items.filter(i => ['CPU', 'GPU', 'MOTHERBOARD'].includes(i.category)).map(i => ({ id: i.id, name: i.name, category: i.category, priceCents: price(i), priceSource: i.priceSource ?? i.estimateBasis, priceObservedAt: i.priceRecord?.observedAt ?? i.priceObservedAt ?? null, retained: retained.has(i.id), exclusion: audit.find(a => a.id === i.id) ?? (retained.has(i.id) ? null : { reason: 'platform-igpu-quality-or-model-filter' }) }));
+  stats.componentRejections = { quality: diagnostics.quality, specification: diagnostics.specification, records: Object.values(diagnostics.records) };
+  stats.rejectedTopK = audit.filter(a => a.reason === 'search-width-top-k').length;
+  return { builds, profile, profileKey: key, stats, candidateLog };
 }
 
 const TIER_LABELS = { save: '省钱版', balanced: '推荐版', plus: '进阶版' };
@@ -432,18 +524,21 @@ function reasonsFor(b, profile) {
   r.SSD = b.ssd.locked ? '已锁定' : `${b.ssd.specs.capacityGB >= 1000 ? `${b.ssd.specs.capacityGB / 1000}TB` : `${b.ssd.specs.capacityGB}GB`}${b.ssd.specs.nand ? ` ${b.ssd.specs.nand}` : ''}${b.ssd.specs.dram === 'dram' ? '、有缓存' : b.ssd.specs.dram === 'hmb' ? '、HMB' : b.ssd.specs.dram === 'none' ? '、无缓存' : ''}`;
   const p = powerEstimate(b.cpu.specs, b.igpu ? null : b.gpu?.specs, { igpu: b.igpu });
   const gp = b.checks.find(c => c.id === 'gpuPower');
-  r.PSU = b.psu.locked ? '已锁定' : `需要 ≥ ${Math.max(p.recommended ?? 0, b.igpu ? 300 : 450)}W，额定 ${b.psu.specs.ratedWatts}W${b.psu.specs.efficiency ? `，${b.psu.specs.efficiency}` : ''}${b.psu.specs.atxVersion ? `，ATX ${b.psu.specs.atxVersion}` : ''}${gp ? `；供电接口${gp.status === PASS ? '已确认' : gp.status === CONDITIONAL ? '需转接（见兼容性）' : '待核实'}` : ''}；满足品质下限里最便宜`;
-  r.CASE = b.case.locked ? '已锁定' : `能装下主板${b.gpu ? `、${b.gpu.specs.lengthMm}mm 显卡` : ''}${b.cooler !== 'STOCK' && b.cooler?.specs.radiatorSizeMm ? `、${b.cooler.specs.radiatorSizeMm}mm 冷排` : ''}，满足条件里最便宜（没有风道数据，不按价格评品质）`;
-  if (b.cooler !== 'STOCK') r.COOLER = b.cooler.locked ? '已锁定' : `CPU 峰值约 ${b.cpu.specs.maxPowerWatts ?? '?'}W，${b.cooler.specs.radiatorSizeMm ? `${b.cooler.specs.radiatorSizeMm}mm 水冷` : `风冷 ${b.cooler.specs.heightMm ?? '?'}mm`}，满足散热要求里最便宜`;
+  r.PSU = b.psu.locked ? '已锁定' : `需要 ≥ ${p.selectionMinimum}W（计算需求 ${p.calculated ?? '未知'}W，厂商建议 ${p.manufacturer ?? '未提供'}W，采购下限 ${p.policyFloor}W），额定 ${b.psu.specs.ratedWatts}W${b.psu.specs.efficiency ? `，${b.psu.specs.efficiency}` : ''}${b.psu.specs.atxVersion ? `，ATX ${b.psu.specs.atxVersion}` : ''}${gp ? `；供电接口${gp.status === PASS ? '已确认' : gp.status === CONDITIONAL ? '需转接（见兼容性）' : '待核实'}` : ''}；满足品质下限里最便宜`;
+  r.CASE = b.case.locked ? '已锁定（仍执行完整检查）' : `明确支持 ${supportedBoardFormats(b.case.specs).join('/')}，已检查已知物理冲突；按整机热负载证据、空间数据完整度及实际价格比较。${b.checks.find(c => c.id === 'caseAirflow')?.detail ?? ''}`;
+  if (b.cooler !== 'STOCK') r.COOLER = b.cooler.locked ? '已锁定（仍执行持续散热检查）' : `高度只用于安装检查；${b.checks.find(c => c.id === 'cpuCooling')?.detail ?? '散热能力待核实'}`;
   return r;
 }
 
-function toPlan(b, profile) {
+function toPlan(b, profile, workload = {}) {
   const reasons = reasonsFor(b, profile);
   const picks = [['CPU', b.cpu], ['GPU', b.gpu], ['MOTHERBOARD', b.board], ['RAM', b.ram], ['SSD', b.ssd], ['PSU', b.psu], ['CASE', b.case], ['COOLER', b.cooler === 'STOCK' ? null : b.cooler]]
-    .filter(([, item]) => item && !item.locked).map(([slot, item]) => ({ slot, item, reason: reasons[slot] }));
+    .filter(([, item]) => item && !item.locked).map(([slot, item]) => ({ slot, item: slot === 'CPU' ? { ...item, specs: { ...item.specs, workload } } : item, reason: reasons[slot] }));
   return {
-    picks, totalCents: b.total, igpu: b.igpu, stockCooler: b.cooler === 'STOCK',
+    picks, totalCents: b.total, additionalCosts: [
+      ...(b.fanCost > 0 ? [{ id: 'case-fans', name: '机箱额外风扇', priceCents: b.fanCost }] : []),
+      ...(b.bracketCost > 0 ? [{ id: 'psu-bracket', name: '电源转接支架', priceCents: b.bracketCost }] : []),
+    ], ...(b.peripherals ? { peripherals: b.peripherals, hostTotalCents: b.hostTotal } : {}), igpu: b.igpu, stockCooler: b.cooler === 'STOCK', risk: b.risk,
     compatibility: { overall: overallStatus(b.checks), checks: b.checks },
     score: { ...b.score, version: SCORING_VERSION },
   };
@@ -461,12 +556,47 @@ function diffNote(prev, cur, prevLabel) {
 }
 
 /**
+ * 相邻两档的核心指标对比（2.2.1）：按实际配置逐项比较，下降的指标写出原值、新值、原因与换来的收益，
+ * 以及是否低于用户最低要求。2.2.0 用固定模板“保留显卡核心指标与内存容量”，即使内存从 64GB 降到 32GB 也照写。
+ */
+export function tradeoffNotes(prev, cur, prevLabel, { minRamGB = 0, minVramGB = 0, minSsdGB = 0 } = {}) {
+  const gb = v => (v >= 1000 ? `${+(v / 1000).toFixed(1)}TB` : `${v}GB`);
+  const metrics = [
+    ['显卡显存', b => b.gpu?.specs.capacityGB ?? 0, gb, minVramGB],
+    ['显卡性能指标', b => b.core?.metric ?? null, v => String(Math.round(v)), 0],
+    ['CPU 指标', b => b.core?.cpu ?? null, v => String(Math.round(v)), 0],
+    ['内存容量', b => b.ram.specs.capacityGB ?? 0, gb, minRamGB],
+    ['硬盘容量', b => b.ssd.specs.capacityGB ?? 0, gb, minSsdGB],
+  ];
+  const ups = []; const downs = [];
+  for (const [label, get, fmt, min] of metrics) {
+    const a = get(prev); const c = get(cur);
+    if (a == null || c == null || a === c) continue;
+    (c > a ? ups : downs).push({ label, from: fmt(a), to: fmt(c), belowMinimum: min > 0 && c < min * 0.93, min: min ? fmt(min) : null });
+  }
+  const extra = cur.total - prev.total;
+  const notes = [];
+  if (!downs.length) notes.push(`与${prevLabel}相比，核心指标没有下降${ups.length ? `；提升：${ups.map(u => `${u.label} ${u.from} → ${u.to}`).join('、')}` : ''}。`);
+  else {
+    const gain = ups.length ? `换来 ${ups.map(u => `${u.label} ${u.from} → ${u.to}`).join('、')}` : `综合评分 ${prev.score.total} → ${cur.score.total}`;
+    for (const d of downs) notes.push(`${d.label}比${prevLabel}低：${d.from} → ${d.to}。原因：按所选策略在本档预算内整机取舍，${gain}${extra ? `，总价${extra > 0 ? '多' : '少'} ${yuan(Math.abs(extra))}` : ''}。${d.belowMinimum ? `低于用途最低要求 ${d.min}。` : d.min ? `仍满足最低要求 ${d.min}。` : ''}`);
+  }
+  return { notes, downs, ups };
+}
+
+/**
  * 三档方案。返回结构与原 recommendPlans 一致（picks / totalCents / notes / compatibility / budget …），另加 score 与升级说明。
  * maxOverPercent：null 不限（尽量不超本档目标，放不下时取最便宜的可行配置并标出）；0 严格；其他为允许超出的比例。
  */
-export function optimizePlans(items, { budgetCents, scenarios = [], maxOverPercent = null, tierRatios, locked = {} }) {
+export function optimizePlans(allItems, { budgetCents, scenarios = [], maxOverPercent = null, tierRatios = { save: .8, balanced: 1, plus: 1.2 }, locked = {}, workload: workloadInput = {}, peripherals = [], strategy = 'balanced', allowUsed = false, allowModified = false }) {
+  if (!STRATEGIES.includes(strategy)) throw new Error('未知推荐策略');
+  // 商品状态过滤（2.2.1）：默认只用全新商品；二手 / 翻新需 allowUsed，改装 / 工程样品需 allowModified，状态未知（规格存疑）不进自动推荐
+  const statusOf = i => i.productStatus ?? productStatus(i).status;
+  const excludedByStatus = allItems.filter(i => !statusAllowed(statusOf(i), { allowUsed, allowModified }));
+  const items = excludedByStatus.length ? allItems.filter(i => statusAllowed(statusOf(i), { allowUsed, allowModified })) : allItems;
   const started = performance.now();
   const key = profileKey(scenarios);
+  const workload = { ...validateWorkload(workloadInput, key), quiet: scenarios.includes('quiet') };
   const office = key === 'office';
   const gaming = ['2k', '4k', '1080p'].includes(key);
   const tiers = Object.entries(tierRatios).map(([id, ratio]) => {
@@ -476,31 +606,62 @@ export function optimizePlans(items, { budgetCents, scenarios = [], maxOverPerce
   const maxTarget = Math.max(...tiers.map(t => t.target));
   // 剪枝上限放宽到最高目标的 1.6 倍（至少 ¥6,000）：严格预算时也要找到“最低可行配置”，才能告诉用户差多少
   const maxCost = Math.max(maxTarget * 1.6, 600000, ...tiers.map(t => (Number.isFinite(t.limit) ? t.limit : 0)));
-  const { builds, profile, stats } = enumerateBuilds(items, { scenarios, locked, maxCostCents: maxCost, igpuOnly: office, allowIgpu: gaming && budgetCents < 500000 });
-  const cheapest = builds.reduce((m, b) => (!m || b.total < m.total ? b : m), null);
+  const { builds: baseBuilds, profile, stats, candidateLog } = enumerateBuilds(items, { scenarios, locked, maxCostCents: maxCost, igpuOnly: office, allowIgpu: gaming && budgetCents < 500000, workload });
 
   const plans = [];
+  const tierSearch = new Map();
+  const tierTradeoffs = new Map();
   let prevBuild = null; let prevTier = null;
+  const peripheralMemo = new Map();
   for (const t of tiers) {
-    const lambda = TIER_COST_PENALTY[t.id] ?? 0.1;
+    const builds = !peripherals.length ? baseBuilds : baseBuilds.map(b => {
+      const key = `${t.id}|${b.gpu?.id}|${b.igpu}`;
+      if (!peripheralMemo.has(key)) peripheralMemo.set(key, recommendPeripherals(items, { scenarios, tier: t.id, igpu: b.igpu, slots: peripherals, gpuIndex: b.gpu?.performance?.gaming?.index ?? null }));
+      const extra = peripheralMemo.get(key);
+      return { ...b, hostTotal: b.total, total: b.total + extra.totalCents, peripherals: extra };
+    }).filter(b => b.peripherals.picks.length === new Set(peripherals).size);
+    const cheapest = builds.reduce((m, b) => (!m || b.total < m.total ? b : m), null);
+
     const within = builds.filter(b => b.total <= Math.min(t.limit, t.target));
+    const search = { all: Map.groupBy(builds, b => b.gpu?.id), within: Map.groupBy(within, b => b.gpu?.id) };
+    tierSearch.set(t.id, search);
     let pool = within;
     // 不限模式下本档目标内没有可行配置时，退到允许范围内最便宜的（会标出超出多少）
     if (!pool.length && Number.isFinite(t.limit)) pool = builds.filter(b => b.total <= t.limit);
     if (!pool.length && !Number.isFinite(t.limit) && cheapest) pool = [cheapest];
     const budget = b => ({ inputCents: budgetCents, targetCents: t.target, limitCents: Number.isFinite(t.limit) ? t.limit : null,
-      overTargetCents: (b?.total ?? 0) - t.target, overInputCents: (b?.total ?? 0) - budgetCents });
+      overTargetCents: b ? b.total - t.target : null, overInputCents: b ? b.total - budgetCents : null });
+    // 用途最低要求：本档有满足的组合就只在这些里挑；都不满足时用最好的并说明
+    const req = MIN_REQUIREMENTS[key] ?? {};
+    const minVram = Math.max(req.vramGB ?? 0, workload.minVramGB ?? 0);
+    const minSsd = workload.minSsdGB ?? req.ssdGB ?? 0;
+    const unmet = b => [
+      req.gpuGaming && !b.igpu && (b.gpu?.performance?.gaming?.index ?? 0) < req.gpuGaming && `显卡 2K 游戏指数 ≥ ${req.gpuGaming}`,
+      req.gpuGaming && b.igpu && `需要独立显卡`,
+      req.discreteGpu && b.igpu && '需要独立显卡（具体游戏目标帧率须实测）',
+      minVram > (b.gpu?.specs.capacityGB ?? 0) && `显存 ≥ ${minVram}GB`,
+      req.ramGB && (b.ram.specs.capacityGB ?? 0) < req.ramGB(t.target) && `内存 ≥ ${req.ramGB(t.target)}GB`,
+      minSsd && (b.ssd.specs.capacityGB ?? 0) < minSsd * 0.93 && `硬盘 ≥ ${minSsd >= 1000 ? `${minSsd / 1000}TB` : `${minSsd}GB`}`,
+      workload.targetFps && b.benchmark?.unit === 'fps-average' && b.benchmark.value < workload.targetFps && `同测试组平均 FPS ≥ ${workload.targetFps}`,
+    ].filter(Boolean);
     if (!pool.length) {
       const reasons = [];
       if (!builds.length) reasons.push(stats.candidates.cpu === 0 || stats.candidates.gpu === 0
         ? '目录里没有满足用途要求的 CPU 或显卡（如 AI 需要 RTX 30 系及以后的 NVIDIA 显卡）。'
-        : '找不到兼容且配齐的组合（锁定的配件之间可能不兼容，或缺少满足兼容性的电源 / 散热 / 机箱）。');
-      else reasons.push(maxOverPercent === 0
-        ? `严格预算：本档目标 ${yuan(t.target)} 内找不到兼容的完整配置，能找到的最低约 ${yuan(cheapest.total)}。`
-        : `允许超出 ${maxOverPercent}%（最多 ${yuan(t.limit)}）仍放不下，能找到的最低约 ${yuan(cheapest.total)}。`);
+        : '当前有界搜索未找到可配齐的组合。查看各项淘汰原因与锁定配件检查。');
+      if (peripherals.length && !builds.length) reasons.push('所选外设无法配齐，或主机加外设总预算不足。');
+      if (cheapest) reasons.push(maxOverPercent === 0
+        ? `严格预算：当前有界搜索在本档 ${yuan(t.target)} 内未找到完整配置。此次搜索的最低完整候选约 ${yuan(cheapest.total)}。`
+        : `允许超出 ${maxOverPercent}%（最多 ${yuan(t.limit)}）。当前有界搜索未找到限额内完整配置。搜索内最低候选约 ${yuan(cheapest.total)}。`);
       const lockedConflict = !builds.length && Object.keys(locked).length ? lockedConflictReason(locked) : null;
+      const failureKind = lockedConflict ? 'confirmed-conflict' : cheapest ? 'budget-within-bounded-search' : 'no-combination-in-bounded-search';
       if (lockedConflict) reasons.unshift(lockedConflict);
       plans.push({ id: t.id, label: t.label, targetCents: t.target, budget: budget(null), infeasible: true, reasons,
+        partialPicks: SLOTS.map(slot => items.filter(i => i.category === slot && candidateLog.some(c => c.id === i.id && c.retained) && price(i) <= t.target).sort((a, b) => price(a) - price(b))[0]).filter(Boolean).map(item => ({ slot: item.category, item, reason: '仅为不完整配置的候选线索，不是可行推荐' })),
+        recommendationStatus: 'infeasible', formalRecommendation: false, failureKind, alternative: cheapest ? { ...toPlan(cheapest, profile, workload), recommendationStatus: 'over_budget_alternative', targetCents: t.target, unmetRequirements: unmet(cheapest),
+          assessment: { budget: 'over', requirements: unmet(cheapest).length ? 'unmet' : 'unverified',
+            physical: cheapest.risk.physical, safety: cheapest.risk.safety, confidence: cheapest.score.confidence,
+            needsConfirmation: true, blockingChecks: cheapest.risk.blockingChecks } } : null,
         minFeasibleCents: cheapest?.total ?? null,
         suggestions: [
           cheapest && `把预算提高到约 ${yuan(Math.ceil(cheapest.total / (tierRatios[t.id] ?? 1) / 10000) * 10000)}（这一档的目标预算就能覆盖）`,
@@ -511,53 +672,112 @@ export function optimizePlans(items, { budgetCents, scenarios = [], maxOverPerce
         picks: [], totalCents: 0, notes: [], igpu: office, stockCooler: false, compatibility: null, score: null });
       continue;
     }
-    // 用途最低要求：本档有满足的组合就只在这些里挑；都不满足时用最好的并说明
-    const req = MIN_REQUIREMENTS[key] ?? {};
-    const unmet = b => [
-      req.gpuGaming && !b.igpu && (b.gpu?.performance?.gaming?.index ?? 0) < req.gpuGaming && `显卡 2K 游戏指数 ≥ ${req.gpuGaming}`,
-      req.gpuGaming && b.igpu && `需要独立显卡`,
-      req.vramGB && (b.gpu?.specs.capacityGB ?? 0) < req.vramGB && `显存 ≥ ${req.vramGB}GB`,
-      req.ramGB && (b.ram.specs.capacityGB ?? 0) < req.ramGB(t.target) && `内存 ≥ ${req.ramGB(t.target)}GB`,
-    ].filter(Boolean);
     // 游戏用途：有独显能放下时不考虑核显
     if (gaming && pool.some(b => !b.igpu)) pool = pool.filter(b => !b.igpu);
     const meeting = pool.filter(b => unmet(b).length === 0);
-    const shortfall = meeting.length ? null : pool;
+
     if (meeting.length) pool = meeting;
-    let best = pool.reduce((m, b) => {
-      const v = b.score.total - lambda * 100 * (b.total / t.target);
-      return !m || v > m.v || (v === m.v && b.total < m.b.total) ? { b, v } : m;
-    }, null).b;
+    else {
+      // Bottleneck first: minimizing demand shortfall precedes optional CPU,
+      // RAM or board luxuries, rather than hiding the missing core experience.
+      const deficit = b => (req.gpuGaming ? Math.max(0, 1 - (b.gpu?.performance?.gaming?.index ?? 0) / req.gpuGaming) * 3 : 0)
+        + (minVram ? Math.max(0, 1 - (b.gpu?.specs.capacityGB ?? 0) / minVram) * 3 : 0)
+        + (req.ramGB ? Math.max(0, 1 - b.ram.specs.capacityGB / req.ramGB(t.target)) : 0) + (req.discreteGpu && b.igpu ? 3 : 0)
+        + (minSsd ? Math.max(0, 1 - (b.ssd.specs.capacityGB ?? 0) / (minSsd * 0.93)) * 0.5 : 0);
+      const minDeficit = Math.min(...pool.map(deficit));
+      pool = pool.filter(b => deficit(b) <= minDeficit + .000001);
+    }
+    search.requirements = Map.groupBy(pool, b => b.gpu?.id);
+    const comparable = pool.filter(b => b.benchmark);
+    if (comparable.length) pool = comparable;
+    search.benchmark = comparable.length ? Map.groupBy(pool, b => b.gpu?.id) : search.requirements;
+    // 2.2.1：取消“有无阻断项的组合就只在无阻断项里选”的硬过滤。2.2.0 中机箱缺少显卡高度 / 厚度 / 电源长度等
+    // 字段（覆盖率 0%），显卡 ≥250W 的整机全部带阻断项，被一律剔除，高预算只能选到 5060 Ti / RX 9070。
+    // FAIL 仍在枚举阶段排除；阻断性的待核实项在评分可信度分项按项扣分，并在方案状态里标为“需核实”。
+    search.safety = search.benchmark;
+    if (prevBuild && prevBuild.total <= Math.min(t.limit, t.target)) {
+      const noRegression = b => (b.benchmark?.id !== prevBuild.benchmark?.id || (b.core.metric ?? 0) >= (prevBuild.core.metric ?? 0))
+        && (profile.gpuMetric !== 'ai' || b.core.vram >= prevBuild.core.vram)
+        && (profile.gpuMetric !== 'creator' || b.ram.specs.capacityGB >= prevBuild.ram.specs.capacityGB);
+      const nonregressing = pool.filter(noRegression);
+      if (nonregressing.length && workload.task !== 'blender') pool = nonregressing;
+    }
+    const best = selectBuild(pool, strategy, t.id, t.target);
+    search.final = Map.groupBy(pool, b => b.gpu?.id);
+    search.winner = best;
     const notes = [];
     let sameAs;
-    // 提升不明显：沿用上一档（上一档的配置在本档也可行），说明原因
-    if (prevBuild && prevBuild.total <= Math.min(t.limit, Math.max(t.target, prevBuild.total)) && best.score.total < prevBuild.score.total + MIN_TIER_GAIN) {
-      notes.push(best !== prevBuild
-        ? `和${prevTier.label}配置相同：多花钱能换到的提升不到 ${MIN_TIER_GAIN} 分（${prevBuild.score.total} → ${best.score.total}），不强行堆料。`
-        : `和${prevTier.label}配置相同：在${yuan(t.target)}的目标预算下，没有找到比${prevTier.label}更值得多花钱的组合。`);
-      best = prevBuild;
+    // 分别搜索各档，只有独立选出的结果相同才复用提示。
+    const sameParts = prevBuild && SLOTS.every(s => {
+      const map = { CPU: 'cpu', GPU: 'gpu', MOTHERBOARD: 'board', RAM: 'ram', SSD: 'ssd', PSU: 'psu', CASE: 'case', COOLER: 'cooler' };
+      return (prevBuild[map[s]]?.id ?? prevBuild[map[s]]) === (best[map[s]]?.id ?? best[map[s]]);
+    });
+    if (sameParts && best.total === prevBuild.total) {
+      notes.push(`与${prevTier.label}配置相同。本档按所选策略评估了预算内候选。`);
       sameAs = prevTier.id;
     } else if (prevBuild) {
       notes.push(diffNote(prevBuild, best, prevTier.label));
+      const absolute = best.score.total - prevBuild.score.total;
+      const relative = prevBuild.score.total > 0 ? absolute / prevBuild.score.total * 100 : 0;
+      notes.push(`升级价值：评分代理绝对变化 ${absolute.toFixed(1)}、相对变化 ${relative.toFixed(1)}%；额外成本 ${yuan(best.total - prevBuild.total)}。`);
+      const tradeoff = tradeoffNotes(prevBuild, best, prevTier.label, { minRamGB: req.ramGB?.(t.target) ?? 0, minVramGB: minVram, minSsdGB: minSsd });
+      notes.push(...tradeoff.notes);
+      tierTradeoffs.set(t.id, tradeoff);
     }
-    if (best.total > t.target) notes.push(`本档目标 ${yuan(t.target)} 内没有兼容的完整配置，这是能找到的最低价配置，超出 ${yuan(best.total - t.target)}。`);
-    if (shortfall && unmet(best).length) notes.push(`这个价位达不到${profile.label}的最低要求（${unmet(best).join('、')}），这是预算内最好的配置，建议提高预算。`);
-    // 剩余预算：再多花一些能换到什么
-    if (!sameAs && best.total < t.target * 0.9) {
-      const next = builds.filter(b => b.total > best.total && b.score.total >= best.score.total + 3).sort((a, b) => a.total - b.total)[0];
-      notes.push(next
-        ? `预算还剩 ${yuan(t.target - best.total)}：再加 ${yuan(next.total - best.total)} 可以把评分从 ${best.score.total} 提到 ${next.score.total}（${diffNote(best, next, '当前').replace(/^比当前多花 [^，]+，/, '')}），性价比不如当前配置。`
-        : `预算还剩 ${yuan(t.target - best.total)}：目录里没有能明显提升评分的升级，当前配置已接近这个用途的最优性价比。`);
-    }
-    const plan = toPlan(best, profile);
-    plans.push({ id: t.id, label: t.label, targetCents: t.target, budget: budget(best), budgetCents: t.target, lockedCents: 0,
-      ...plan, ...(sameAs ? { sameAs } : {}),
+    if (best.total > t.target) notes.push(`当前有界搜索在本档目标 ${yuan(t.target)} 内未找到完整组合。本次搜索所得最低价替代超出 ${yuan(best.total - t.target)}。`);
+    if (unmet(best).length) notes.push(`这个价位达不到${profile.label}的最低要求（${unmet(best).join('、')}），${best.total > t.target ? '此替代同时超预算。' : '当前预算内候选未达到使用要求。'}`);
+    const upgrades = strongerOptions(within.filter(b => b.benchmark?.id === best.benchmark?.id && !unmet(b).length), best);
+    if (upgrades.length) notes.push(`预算内还有 ${upgrades.length} 个核心性能升级选项。当前方案由 ${strategy === 'performance' ? '性能优先' : strategy === 'value' ? '性价比优先' : '均衡推荐'}策略选出。`);
+    const plan = toPlan(best, profile, workload);
+    const scenarioEvidenceMissing = (workload.targetFps || workload.benchmarkId || ['4k', 'ai', 'creator'].includes(key)) && !best.benchmark;
+    const recommendationStatus = best.total > t.target ? 'over_budget_alternative' : unmet(best).length ? 'degraded' : plan.compatibility.overall === UNKNOWN || scenarioEvidenceMissing ? 'verification_required' : plan.compatibility.overall === CONDITIONAL ? 'conditional' : 'feasible';
+    notes.push(`性能依据：${plan.score.performanceBasis}；可信度 ${plan.score.confidence}，只可在相同场景与评分版本内比较。`);
+    if (best.benchmark) notes.push(`指定测试组 ${best.benchmark.title ?? best.benchmark.game ?? best.benchmark.id}，${best.benchmark.value} ${best.benchmark.unit}。测试条件 ${best.benchmark.conditions}。来源 ${best.benchmark.sourceUrl}`);
+    else if (workload.targetFps) notes.push(`${workload.game || '所选游戏'} / ${workload.quality || '未指定画质'}目标 ${workload.targetFps} FPS 缺少匹配测试组，结果待核实。`);
+    plans.push({ id: t.id, label: t.label, targetCents: t.target, budget: budget(best), budgetCents: t.target, lockedCents: Object.values(locked).reduce((sum, p) => sum + (p.priceCents ?? 0), 0),
+      ...plan, strategy, corePerformance: best.core, tradeoffs: tierTradeoffs.get(t.id) ?? null,
+      assessment: { budget: best.total <= t.target ? 'met' : 'over', requirements: unmet(best).length ? 'unmet' : scenarioEvidenceMissing ? 'unverified' : 'met',
+        physical: best.risk.physical, safety: best.risk.safety, confidence: plan.score.confidence,
+        needsConfirmation: best.risk.needsConfirmation || Boolean(scenarioEvidenceMissing), blockingChecks: best.risk.blockingChecks },
+      upgrades: upgrades.map(b => ({ ...toPlan(b, profile, workload), id: t.id, label: t.label, targetCents: t.target, corePerformance: b.core,
+        extraCents: b.total - best.total, reason: b.risk.blockingChecks.length
+          ? `性能指标更高，仍需核实 ${b.risk.blockingChecks.length} 项关键风险` : '性能指标更高，当前策略更重视成本与整机搭配' })),
+      ...(sameAs ? { sameAs } : {}),
+      recommendationStatus, formalRecommendation: recommendationStatus === 'feasible', unmetRequirements: unmet(best), requirementsEvidence: scenarioEvidenceMissing ? 'UNKNOWN' : 'PROXY_OR_MEASURED', workload,
       notes: [...notes, ...(plan.igpu ? ['核显方案：不配独立显卡，用 CPU 自带核显。'] : []),
         `价格为参考价估算，不是报价。综合评分按“${profile.label}”的权重计算（${SCORING_VERSION}），只用于在候选之间比较，不代表实际帧数或 AI 吞吐。`] });
     prevBuild = best; prevTier = t;
   }
-  const elapsedMs = Math.round(performance.now() - started);
-  return { plans, meta: { profile: key, stats, elapsedMs, scoringVersion: SCORING_VERSION } };
+  const gpuAlternatives = [...Map.groupBy(baseBuilds.filter(b => b.gpu), b => b.gpu.id)].map(([id, bs]) => {
+    const top = bs.reduce((a, b) => a.score.total > b.score.total ? a : b);
+    const selectedBy = plans.filter(p => tierSearch.get(p.id).winner?.gpu?.id === id).map(p => p.id);
+    return { id, name: top.gpu.name, gpuPriceCents: price(top.gpu), minimumBuildCents: Math.min(...bs.map(b => b.total)), bestScore: top.score, corePerformance: top.core, blockers: top.risk.blockingChecks, selectedBy, reason: selectedBy.length ? '入选指定档位' : '逐档淘汰依据见 tierDecisions', tierDecisions: plans.map(p => {
+      const stage = tierSearch.get(p.id);
+      const complete = stage.all.get(id) ?? [];
+      const fitting = stage.within.get(id) ?? [];
+      const objective = b => selectionValue(b, strategy, p.id, p.targetCents);
+      const alternative = fitting.reduce((m, b) => !m || objective(b) > objective(m) ? b : m, null);
+      const finalists = stage.final?.get(id) ?? [];
+      const finalBest = finalists.length ? selectBuild(finalists, strategy, p.id, p.targetCents) : null;
+      const counts = { requirements: stage.requirements?.get(id)?.length ?? 0, comparable: stage.benchmark?.get(id)?.length ?? 0,
+        safety: stage.safety?.get(id)?.length ?? 0, final: finalists.length };
+      const reason = selectedBy.includes(p.id) ? (fitting.length ? '已入选' : '已入选为超预算替代')
+        : !complete.length ? '未形成含所选外设的完整组合'
+          : !fitting.length ? `搜索内最低完整成本 ${yuan(Math.min(...complete.map(b => b.total)))} 超过本档目标`
+            : !counts.requirements ? '用途门槛或需求缺口排序排除'
+              : !counts.comparable ? '缺少指定条件的同组性能实测'
+                : !counts.safety ? '当前策略优先采用没有关键待核实项的组合'
+                  : !counts.final ? '跨档核心指标和容量下限排除'
+                    : '进入最终排序，当前策略的目标值或并列取舍未胜出';
+      return { tier: p.id, targetCents: p.targetCents, withinBudget: fitting.length, counts,
+        bestWithinBudget: alternative ? { totalCents: alternative.total, score: alternative.score, core: alternative.core,
+          blockingChecks: alternative.risk.blockingChecks, objective: objective(alternative) } : null,
+        finalistObjective: finalBest ? objective(finalBest) : null, winnerObjective: stage.winner ? objective(stage.winner) : null,
+        selectedGpu: stage.winner?.gpu?.id ?? null, reason };
+    }) };
+  });
+  return { plans, meta: { profile: key, workload, strategy, stats, candidateLog, gpuAlternatives,
+    productStatusFilter: { allowUsed, allowModified, excluded: excludedByStatus.filter(i => ['CPU', 'GPU'].includes(i.category)).map(i => ({ id: i.id, name: i.name, status: statusOf(i), reason: i.productStatusReason ?? productStatus(i).reason })) }, elapsedMs: Math.round(performance.now() - started), scoringVersion: SCORING_VERSION, exportedAt: new Date().toISOString() } };
 }
 
 /** 锁定配件之间确认不兼容时说明是哪一项 */
