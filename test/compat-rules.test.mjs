@@ -36,7 +36,9 @@ test('16pin 显卡：原生 PASS，转接线够用 CONDITIONAL，8pin 不够 FAI
   const gpu = { powerPins: { pin6: 0, pin8: 0, pin16: 1 }, boardPowerWatts: 360 };
   assert.equal(gpuPowerCheck(gpu, { pin16Count: 1 }).status, PASS);
   assert.equal(gpuPowerCheck(gpu, { pin16Count: 0, pcie8Count: 4 }).status, CONDITIONAL);
-  assert.equal(gpuPowerCheck(gpu, { pcie8Count: 2 }).status, FAIL);
+  // 2.2.2：原生 16pin 明确没有时 8pin 不够为 FAIL；原生接口未知时不能判死（可能有未记录的原生线）
+  assert.equal(gpuPowerCheck(gpu, { pcie8Count: 2, native16Pin: false }).status, FAIL);
+  assert.equal(gpuPowerCheck(gpu, { pcie8Count: 2 }).status, UNKNOWN);
   assert.equal(gpuPowerCheck(gpu, {}).status, UNKNOWN);
   assert.equal(gpuPowerCheck({}, { pcie8Count: 4 }).status, UNKNOWN);
 });

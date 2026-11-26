@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { correctHardware } from '../src/catalog-corrections.mjs';
 import { enrichSpecs } from '../src/specs-enrich.mjs';
-import { caseThermalCheck, memorySpeedCheck, psuFitCheck, stockCooler } from '../src/hardware-specs.mjs';
-import { evaluateBuild, overallStatus, powerEstimate } from '../src/compat-rules.mjs';
+import { caseThermalCheck, hardwareDetails, memorySpeedCheck, pcieLink, psuFitCheck, stockCooler } from '../src/hardware-specs.mjs';
+import { biosSupport, cpuHasIgpu, evaluateBuild, overallStatus, powerEstimate } from '../src/compat-rules.mjs';
 import { optimizePlans } from '../src/optimizer.mjs';
 import { corePerformance } from '../src/recommendation-strategy.mjs';
 import { SCORING_PROFILES } from '../src/scoring-profiles.mjs';
@@ -190,4 +190,64 @@ test('场景基准要求同一个测试组与任务', () => {
   assert.equal(matchingBenchmark(gpu, { ...llm, model: 'Llama 2 7B Chat' }), null);
   assert.equal(data.forGpu('RTX 4090', 24).find(row => row.task === 'finetuning').value, 1.79);
   assert.equal(data.forGpu('RTX 4090', 48).some(row => row.task === 'finetuning'), false);
+});
+test('21 Core Ultra 200S Plus 平台规格（7200 MT/s、PCIe 5.0 直连 M.2、无原装散热）', () => {
+  const k = enrichSpecs({ category: 'CPU', name: 'Intel Core Ultra 5 250K Plus', specs: { socket: 'LGA1851', packaging: '盒装' } });
+  assert.equal(k.cpuMemoryMaxMTs, 7200);
+  assert.equal(k.cpuMemoryMaxMTsByType.DDR5, 7200);
+  assert.deepEqual(k.pcieLink, { gen: 5, lanes: 16 });
+  assert.deepEqual(k.storagePcieLink, { gen: 5, lanes: 4 });
+  assert.equal(k.stockCoolerIncluded, false);
+  assert.equal(stockCooler({ name: 'Intel Core Ultra 5 250K Plus', mpn: 'BX80768250K', specs: k }), false);
+  assert.equal(cpuHasIgpu('Intel Core Ultra 5 250K Plus', k), true);
+
+  const kf = corrected('zol-2179677', 'CPU', enrichSpecs({ category: 'CPU', name: 'Intel 酷睿 Ultra 5 250KF Plus', specs: { socket: 'LGA1851', packaging: '盒装' } }));
+  assert.equal(cpuHasIgpu('Intel 酷睿 Ultra 5 250KF Plus', kf.specs), false);
+  assert.equal(kf.specs.cpuMemoryMaxMTs, 7200);
+  assert.deepEqual(kf.specs.storagePcieLink, { gen: 5, lanes: 4 });
+});
+test('22 ZOL 机箱风扇位与水冷位结构化解析不虚构标配风扇数', () => {
+  const gx = enrichSpecs({ category: 'CASE', name: '航嘉GX750A掠夺者', specs: {}, rawParams: {
+    前置风扇位: '3×120mm风扇位', 后置风扇位: '1×120mm风扇位', 其它风扇位: '侧置：2×120mm风扇位 顶置：3×120mm风扇位', 支持水冷: '顶置：360mm水冷排',
+  } });
+  assert.deepEqual(gx.intakePositions, ['front', 'side']);
+  assert.deepEqual(gx.exhaustPositions, ['rear', 'top']);
+  assert.equal(gx.maxRadiatorMm, 360);
+  assert.deepEqual(gx.radiatorPositions, [{ position: 'top', sizesMm: [360] }]);
+  assert.equal(gx.includedFans, undefined);
+  assert.equal(gx.fanMounts.find(m => m.position === 'top').count, 3);
+
+  const withStock = enrichSpecs({ category: 'CASE', name: '测试机箱', specs: {}, rawParams: {
+    其它风扇位: '前置：3×120mm风扇位（标配1×120mm风扇） 后置：1×120mm风扇（标配）',
+  } });
+  assert.equal(withStock.includedFans, 2);
+});
+test('23 主板多槽 M.2 择优匹配、BIOS Flashback 与 ReBAR 结构化判定', () => {
+  const b860 = corrected('buildcores-6efb715c-74b5-4f50-8948-46069e4e1307', 'MOTHERBOARD', { socket: 'LGA1851', chipset: 'B860' });
+  const ssd5 = { pcieLink: { gen: 5, lanes: 4 } };
+  const cpu5 = { storagePcieLink: { gen: 5, lanes: 4 } };
+  const link = pcieLink(cpu5, b860.specs, ssd5, { storage: true });
+  assert.equal(link.status, 'PASS');
+  assert.match(link.detail, /M2A_CPU/);
+
+  const biosMsg = biosSupport('Intel 酷睿 Ultra 7 270K Plus', 'Z890', { biosFlashback: true });
+  assert.equal(biosMsg.status, 'CONDITIONAL');
+  assert.match(biosMsg.detail, /Flashback/);
+
+  const arcBase = { CPU: part({ socket: 'AM4', maxPowerWatts: 65 }), GPU: part({ chipset: 'Arc B580', needsResizableBar: true, powerPins: { pin8: 1 }, boardPowerWatts: 190, lengthMm: 270 }), MOTHERBOARD: part({ socket: 'AM4', chipset: 'B550', rebarSupport: true }) };
+  assert.equal(check(arcBase, 'rebar').status, 'CONDITIONAL');
+  assert.equal(check({ ...arcBase, MOTHERBOARD: part({ socket: 'AM4', chipset: 'A320', rebarSupport: false }) }, 'rebar').status, 'FAIL');
+  assert.equal(check({ ...arcBase, MOTHERBOARD: part({ socket: 'AM4', chipset: 'A320' }) }, 'rebar').status, 'UNKNOWN');
+
+  const validated = hardwareDetails({ rebarSupport: 'bios-update', biosFlashback: true, cpuMemoryMaxMTsByType: { DDR5: 7200 } });
+  assert.equal(validated.rebarSupport, 'bios-update');
+});
+test('24 optimizePlans 延迟切片检查与完整 evaluateBuild 逐项一致', () => {
+  const res = optimizePlans(fixtures, { budgetCents: 600000, maxOverPercent: 0, scenarios: ['ai'], strategy: 'performance' });
+  for (const plan of res.plans) {
+    if (plan.infeasible) continue;
+    const parts = Object.fromEntries(plan.picks.map(p => [p.slot, p.item]));
+    const direct = evaluateBuild(parts, { igpu: plan.igpu, stockCooler: plan.stockCooler, workload: plan.workload });
+    assert.deepEqual(plan.compatibility.checks, direct);
+  }
 });

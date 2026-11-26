@@ -229,7 +229,10 @@ export interface PlanResult extends RecommendResult {
   recommendationStatus?: 'feasible' | 'conditional' | 'verification_required' | 'degraded' | 'over_budget_alternative' | 'infeasible';
   formalRecommendation?: boolean;
   hostTotalCents?: number;
-  additionalCosts?: { id: string; name: string; priceCents: number }[];
+  additionalCosts?: { id: string; name: string; priceCents: number; quantity?: number; unitPriceCents?: number | null; priceSource?: 'estimate' | 'user' | 'case-record' | 'unknown'; estimatedRangeCents?: (number | null)[]; basis?: string }[];
+  /** V2.2.2：核心八件套 + 必需附件 = 完整可安装总价（totalCents） */
+  coreTotalCents?: number;
+  costBreakdown?: { coreCents: number; requiredAccessoriesCents: number; optionalAccessoriesCents: number; completeBuildCents: number; estimatedRangeCents: number[]; accessoryPriceStatus: 'known' | 'estimated' | 'unknown' } | null;
   id: 'save' | 'balanced' | 'plus';
   label: string;
   targetCents: number;

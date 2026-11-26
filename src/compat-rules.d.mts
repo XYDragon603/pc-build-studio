@@ -31,6 +31,6 @@ export function overallStatus(checks: CompatCheck[]): Exclude<CompatStatus, 'NOT
 export function powerEstimate(cpu: Record<string, unknown> | null | undefined, gpu: Record<string, unknown> | null | undefined, opts?: { igpu?: boolean }):
   { cpuW: number | null; gpuW: number | null; load: number | null; recommended: number | null; calculated: number | null; manufacturer: number | null; policyFloor: number; selectionMinimum: number };
 export function cpuHasIgpu(name: string, specs?: Record<string, unknown>): boolean;
-export function biosSupport(cpuName: string, boardChipset: string): { status: CompatStatus; detail: string };
+export function biosSupport(cpuName: string, boardChipset: string, boardSpecs?: Record<string, unknown>): { status: CompatStatus; detail: string };
 export function gpuPowerCheck(gpu: Record<string, unknown> | null | undefined, psu: Record<string, unknown> | null | undefined): { status: CompatStatus; detail: string };
 export const severity: (status: CompatStatus) => number;

@@ -69,7 +69,10 @@ test('V2.1 05: 高功耗 GPU 缺机箱风道时不是 PASS，整机 UNKNOWN', ()
   p.CASE.specs = { ...p.CASE.specs, frontIntake: undefined, thermalTests: undefined, intakePositions: undefined, exhaustPositions: undefined };
   const c = evaluateBuild(p); const airflow = c.find(c => c.id === 'caseAirflow');
   assert.equal(airflow.status, 'UNKNOWN'); assert.equal(airflow.blocking, true); assert.equal(overallStatus(c), 'UNKNOWN');
+  // 2.2.2：高负载只知道风扇位“有无”、不知道数量时仍为关键待核实；数量满足需求才是 CONDITIONAL
   p.CASE.specs = { ...p.CASE.specs, intakePositions: ['front'], exhaustPositions: ['rear'] };
+  assert.equal(evaluateBuild(p).find(c => c.id === 'caseAirflow').status, 'UNKNOWN');
+  p.CASE.specs = { ...p.CASE.specs, fanMounts: [{ position: 'front', count: 3, sizeMm: 120 }, { position: 'rear', count: 1, sizeMm: 120 }] };
   const known = evaluateBuild(p).find(c => c.id === 'caseAirflow');
   assert.equal(known.status, 'CONDITIONAL'); assert.match(known.detail, /进风/); assert.match(known.detail, /没有整机持续温度/);
 });
@@ -124,7 +127,7 @@ test('V2.1 15: 安静优先使用覆盖负载的实测噪音依据', () => {
 });
 test('V2.1 16: 外设成本计入档位目标预算，缺外设时说明无解', () => {
   for (const p of plans(500000, { peripherals: ['KEYBOARD', 'MOUSE'] }).filter(p => !p.infeasible)) {
-    assert.equal(p.totalCents, p.picks.reduce((n, x) => n + x.item.estimatedPriceCents, 0) + p.peripherals.totalCents); assert(p.totalCents <= p.targetCents);
+    assert.equal(p.totalCents, p.picks.reduce((n, x) => n + x.item.estimatedPriceCents, 0) + p.peripherals.totalCents + p.additionalCosts.reduce((n, x) => n + x.priceCents, 0)); assert(p.totalCents <= p.targetCents);
   }
   assert(plans(800000, { peripherals: ['MONITOR'] }).every(p => p.infeasible));
 });

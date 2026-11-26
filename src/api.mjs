@@ -262,8 +262,15 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         return;
       }
       if (pathname === '/api/v1/plans' && method === 'POST') {
-        const { budgetCents, scenarios = [], peripherals = [], maxOverPercent = null, locked = {}, priceMode, allowUsed, allowModified = false, strategy = 'balanced', workload: workloadInput = {} } = await readJson(request);
+        const { budgetCents, scenarios = [], peripherals = [], maxOverPercent = null, locked = {}, priceMode, allowUsed, allowModified = false, strategy = 'balanced', workload: workloadInput = {}, accessoryPricing: accessoryInput = {} } = await readJson(request);
         if (typeof allowModified !== 'boolean') throw invalid('allowModified 必须为布尔值');
+        // 2.2.2：用户确认的附件单价 / 锁定机箱预装风扇数，改动后完整总价与预算重新计算
+        if (!accessoryInput || typeof accessoryInput !== 'object' || Array.isArray(accessoryInput)) throw invalid('accessoryPricing 必须是对象');
+        const accessoryPricing = {};
+        for (const [k, max] of [['fanUnitCents', 100000], ['includedFans', 12]]) if (accessoryInput[k] != null) {
+          if (!Number.isSafeInteger(accessoryInput[k]) || accessoryInput[k] < 0 || accessoryInput[k] > max) throw invalid(`accessoryPricing.${k} 无效`);
+          accessoryPricing[k] = accessoryInput[k];
+        }
         if (!STRATEGIES.includes(strategy)) throw invalid('strategy 只能是 value、balanced 或 performance');
         const options = priceOptions({ priceMode, allowUsed });
         if (!Number.isSafeInteger(budgetCents) || budgetCents < 100000 || budgetCents > 100000000) throw invalid('budgetCents 需为 1000–1000000 元之间的整数分');
@@ -275,7 +282,7 @@ export function createApiServer({ directory, catalogDirectory = directory, stati
         const items = pricedCatalog.filter(forPlans);
         let workload;
         try { workload = validateWorkload(workloadInput, scenarios.find(s => s !== 'quiet') ?? 'office'); } catch (error) { throw invalid(error.message); }
-        const { plans, meta } = recommendPlansWithMeta(items, { budgetCents, scenarios, maxOverPercent, locked: parseLocked(locked), workload, peripherals, strategy, allowUsed: options.allowUsed, allowModified });
+        const { plans, meta } = recommendPlansWithMeta(items, { budgetCents, scenarios, maxOverPercent, locked: parseLocked(locked), workload, peripherals, strategy, allowUsed: options.allowUsed, allowModified, accessoryPricing });
         meta.catalogFilter = { initialCount: pricedCatalog.length, eligibleCount: items.length, reasons: { globalMarket: pricedCatalog.filter(i => i.market !== 'cn').length, suspectPrice: pricedCatalog.filter(i => i.possiblyStale).length, workstation: pricedCatalog.filter(i => i.workstation).length, broadEstimate: pricedCatalog.filter(i => ['class-median', 'series-low'].includes(i.estimateBasis)).length }, excluded: pricedCatalog.filter(i => ['CPU', 'GPU'].includes(i.category) && i.market === 'cn' && !forPlans(i)).map(i => ({ id: i.id, name: i.name, priceCents: i.estimatedPriceCents ?? null, priceSource: i.sourceUrl, reason: i.possiblyStale ? 'suspect-price' : i.workstation ? 'workstation' : 'broad-estimate' })) };
         const priceMeta = { mode: options.mode, allowUsed: options.allowUsed, userPriced: items.filter(item => item.priceSource === 'user').length };
         return json(response, 200, { plans, priceMeta, meta });

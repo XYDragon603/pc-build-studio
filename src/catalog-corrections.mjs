@@ -7,8 +7,20 @@ const byId = new Map(corrections.records.map(record => [record.id, record]));
 // 2.2.1：同时按厂商料号（manufacturer SKU / mpn）关联。2.2.0 只按目录 ID 匹配，
 // A21 机箱、5060 Ti WINDFORCE 两条修正的 ID 在运行时目录中不存在，修正从未生效。
 const byMpn = new Map(corrections.records.flatMap(record => (record.mpn ?? []).map(sku => [sku.toUpperCase(), record])));
+/**
+ * 2.2.2：同一认证型号可能有多个硬件版本（如长城 GW-ATX1300BL 旧版与 G13MG ATX3.1、技嘉 PG5 Rev 1.0 / 2.0），
+ * 接口规格不同。修正记录带 requiresRevision（版本标识，如 "G13MG"、料号 "5194268"、"REV 2.0"）时，
+ * 只有目录条目的名称 / 料号中能找到其中之一才应用；否则不合并，记入 skippedCorrections。
+ */
+export function revisionMatches(record, item) {
+  if (!record?.requiresRevision?.length) return true;
+  const text = [item.name, item.mpn, ...(item.partNumbers ?? []), ...(item.aliases ?? []), item.specs?.hardwareRevision].filter(Boolean).join(' ').toUpperCase().replace(/s+/g, ' ');
+  return record.requiresRevision.some(token => text.includes(String(token).toUpperCase()));
+}
 export function correctHardware(item, overrides = {}) {
-  const correction = byId.get(item.id) ?? byId.get(item.zolId) ?? (item.mpn ? byMpn.get(String(item.mpn).toUpperCase()) : undefined);
+  const candidate = byId.get(item.id) ?? byId.get(item.zolId) ?? (item.mpn ? byMpn.get(String(item.mpn).toUpperCase()) : undefined);
+  const correction = candidate && revisionMatches(candidate, item) ? candidate : undefined;
+  const skipped = candidate && !correction ? [{ id: candidate.id, reason: `修正记录要求硬件版本 ${candidate.requiresRevision.join(' / ')}，目录条目无法确认是同一版本，不合并规格` }] : null;
   let specs = { ...item.specs, ...correction?.specs, ...overrides[item.id]?.specs };
   // Platform ceiling is a general rule, not a model-specific recommendation.
   if (item.category === 'MOTHERBOARD' && /^(?:AMD\s*)?A520$/i.test(specs.chipset ?? '')) {
@@ -23,7 +35,7 @@ export function correctHardware(item, overrides = {}) {
   const provenance = correction || overrides[item.id]
     ? fieldProvenance({ ...item, specs }, correction, overrides[item.id], corrections.verifiedOn).filter(p => ['verified', 'user-recorded'].includes(p.verification_status))
     : undefined;
-  return { ...item, specs, summary, ...(correction ? { specCorrection: correction } : {}), ...(provenance ? { fieldProvenance: provenance } : {}) };
+  return { ...item, specs, summary, ...(correction ? { specCorrection: correction } : {}), ...(skipped ? { skippedCorrections: skipped } : {}), ...(provenance ? { fieldProvenance: provenance } : {}) };
 }
 export function normalizeSpecOverride(input) {
   if (!input?.specs || typeof input.specs !== 'object' || Array.isArray(input.specs)) throw new Error('specs 必须是对象');

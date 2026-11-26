@@ -1,4 +1,4 @@
-// V2.2.1 批量测试：走真实 POST /api/v1/plans（隔离存储、本机目录），不需要逐一点击页面。
+// V2.2.1 / V2.2.2 批量测试：走真实 POST /api/v1/plans（隔离存储、本机目录），不需要逐一点击页面。
 //   基础矩阵：12 组场景 × 3 种策略（value / balanced / performance）× 每组三档 = 108 套
 //   额外测试：严格预算、锁定显卡、锁定主板、安静优先、包含外设、手动改价、指定 SSD 最低容量、指定 AI 显存、
 //            仅全新商品（与允许改装对照）、极端低预算与高预算
@@ -59,6 +59,17 @@ function invariants(plan, prev, request) {
       if (cap(plan, slot) && cap(prev, slot) && cap(plan, slot) < cap(prev, slot) && !new RegExp(`${label}比${prev.label}低`).test(text)) fails.push(`${label}下降但说明未写明`);
     }
   }
+  // V2.2.2 不变量：完整成本模型一致；散热 / 供电线空间不靠尺寸代理；附件估算不标为无条件预算满足
+  if (plan.costBreakdown && plan.costBreakdown.completeBuildCents + peripherals !== plan.totalCents) fails.push(`成本分解 ${plan.costBreakdown.completeBuildCents} + 外设 ≠ 总价 ${plan.totalCents}`);
+  if (plan.costBreakdown && plan.costBreakdown.requiredAccessoriesCents !== extra) fails.push('必需附件与 additionalCosts 不一致');
+  const cooling = checks.find(c => c.id === 'cpuCooling');
+  if (cooling && ['PASS', 'CONDITIONAL'].includes(cooling.status) && (!cooling.evidence?.level || cooling.evidence.level === 'none')) fails.push('CPU 散热条件通过但没有证据等级');
+  if (cooling && /塔高.*足以|尺寸.*足以覆盖|按散热器尺寸/.test(cooling.detail)) fails.push('CPU 散热仍按尺寸推断能力');
+  if (cooling && ['PASS', 'CONDITIONAL'].includes(cooling.status) && cooling.evidence?.level === 'vendor_rating' && cooling.evidence.requiredWatts > 200) fails.push('厂商标称被用于 >200W 持续负载');
+  if (checks.some(c => /另购.*未计入总价|未计入总价）/.test(c.detail))) fails.push('兼容说明仍写风扇费用未计入总价');
+  const cable = checks.find(c => c.id === 'gpuCable');
+  if (cable && cable.status !== 'UNKNOWN' && cable.status !== 'FAIL' && /按散热器限高.*推断/.test(cable.detail)) fails.push('16pin 供电线空间仍用散热器限高确认');
+  if (plan.assessment?.budget === 'met' && plan.costBreakdown?.accessoryPriceStatus && plan.costBreakdown.accessoryPriceStatus !== 'known' && plan.costBreakdown.requiredAccessoriesCents > 0) fails.push('附件为估算价却标为预算满足');
   const minSsd = request.workload?.minSsdGB;
   if (minSsd && cap(plan, 'SSD') < minSsd * 0.93 && !(plan.unmetRequirements ?? []).some(r => /硬盘/.test(r))) fails.push('低于指定 SSD 容量却未标明');
   const minVram = request.workload?.minVramGB;
@@ -150,6 +161,16 @@ await run('new-only', 'AI ¥30000 默认（仅全新）', req(30000, 'ai'), (pla
 });
 await run('allow-modified', 'AI ¥30000 允许改装（对照）', req(30000, 'ai', { allowModified: true }));
 
+// 8b. 附件单价（V2.2.2）：同一请求改风扇单价，完整总价按另购数量变化；不允许低价把预算判断“做平”
+{
+  const a = await run('accessory-price', 'AI ¥20000 风扇单价 ¥10（用户确认）', req(20000, 'ai', { accessoryPricing: { fanUnitCents: 1000 } }));
+  await run('accessory-price', 'AI ¥20000 风扇单价 ¥60（用户确认）', req(20000, 'ai', { accessoryPricing: { fanUnitCents: 6000 } }), plans => plans.filter(p => !p.infeasible).flatMap(p => {
+    const fan = (p.additionalCosts ?? []).find(c => c.id === 'case-fans');
+    return fan && fan.priceCents !== fan.quantity * 6000 ? [`${p.id}: 风扇费用 ${fan.priceCents} ≠ 数量 × 单价`] : [];
+  }));
+  void a;
+}
+
 // 9. 极端预算
 await run('extreme', '办公 ¥1000（最低）', req(1000, 'office'));
 await run('extreme', '4K ¥3000（远低于需求）', req(3000, '4k'));
@@ -166,7 +187,7 @@ const summary = {
   byStrategy: Object.fromEntries(STRATEGIES.map(s => [s, summarizePlans(base108.filter(x => x.strategy === s))])),
 };
 await writeFile(join(output, 'batch-results.json'), JSON.stringify({ summary, runs: runs.map(({ raw, ...r }) => r) }, null, 2) + '\n');
-const md = ['# V2.2.1 批量测试结果', '', `测试时间：${summary.testedAt}。命令：\`node scripts/batch-test.mjs\`。`, '',
+const md = ['# V2.2.2 批量测试结果', '', `测试时间：${summary.testedAt}。命令：\`node scripts/batch-test.mjs\`。`, '',
   `共 ${summary.runs} 次请求，通过 ${summary.passed}，失败 ${summary.failed}；基础矩阵 ${summary.basePlans} 套方案。`, '',
   '| 测试组 | 请求数 | 失败 |', '|---|---:|---:|', ...Object.entries(summary.byGroup).map(([g, v]) => `| ${g} | ${v.runs} | ${v.failed} |`), '',
   '## 失败明细', '', ...runs.filter(r => !r.passed).flatMap(r => [`- [${r.group}] ${r.label}：${r.failures.join('；')}`]), runs.every(r => r.passed) ? '无' : '', ''];

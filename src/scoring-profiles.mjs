@@ -17,7 +17,7 @@
 //   Blender    Blender Open Data（CC0），中位数，≥3 次提交
 //   显存、功耗  目录规格（ZOL 参数页 / BuildCores）
 
-export const SCORING_VERSION = '2.2.1';
+export const SCORING_VERSION = '2.2.2';
 
 const W = (gpu, cpu, memory, storage, quality, noise, trust) => ({ gpu: gpu * .9, cpu: cpu * .9, memory: memory * .9, storage: storage * .9, quality: quality * .9, noise: noise * .9, trust: trust * .9, balance: .06, upgrade: .04 });
 

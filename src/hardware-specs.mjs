@@ -1,3 +1,5 @@
+import { fanMountCapacity, requiredCaseFans } from './accessories.mjs';
+import { capacityCovers, coolingCapacity, powerLimitOption, VENDOR_RATING_MAX_W } from './thermal-evidence.mjs';
 // Shared, explicit physical formats. Product names and case exterior dimensions
 // are never used as evidence of motherboard support.
 export const BOARD_FORMATS = ['MINI-ITX', 'MICRO ATX', 'ATX', 'EATX'];
@@ -54,14 +56,19 @@ export function memorySpeedCheck(cpu, board, ram, sku) {
   const qvl = sku && board.memoryQvl?.find(entry => entry.sku === sku && entry.modules === ram.modules &&
     entry.rank === ram.rank && entry.speedMTs >= target);
   if (!target) return null;
-  if (target > limit) return { status: 'CONDITIONAL', detail: `标称 ${target} MT/s，高于已知上限 ${limit} MT/s。采用经主板和 CPU 验证的 JEDEC 频率，超频需核对 QVL 并验证稳定性。` };
-  if (published && board.memoryMaxMTs && qvl && ram.jedecMTs >= target) return { status: 'PASS', detail: `该料号、条数和 Rank 有主板 QVL，${target} MT/s 在已知范围内。` };
-  if (ram.jedecMTs && ram.jedecMTs < target) return { status: 'CONDITIONAL', detail: `JEDEC ${ram.jedecMTs} MT/s。标称 ${target} MT/s 需核对 XMP/EXPO、主板 QVL 和稳定性。` };
+  // 2.2.2：分开报告四类依据：CPU 官方规格、主板上限、内存 JEDEC 配置、组合稳定性（QVL / 实测）
+  const factors = { cpuSpec: published ? `CPU 官方最高 ${published} MT/s` : 'CPU 内存规格未知', boardSpec: board.memoryMaxMTs ? `主板上限 ${board.memoryMaxMTs} MT/s` : '主板内存上限未录入',
+    jedec: ram.jedecMTs ? `JEDEC ${ram.jedecMTs} MT/s` : '内存 JEDEC 配置未知（标称值可能是 XMP / EXPO）', stability: qvl ? '主板 QVL 列有此料号' : '组合稳定性未验证（无 QVL / 实测）' };
+  const why = `［${Object.values(factors).join('；')}］`;
+  if (target > limit) return { status: 'CONDITIONAL', factors, detail: `标称 ${target} MT/s，高于已知上限 ${limit} MT/s：按 ${limit} MT/s 或 JEDEC 频率运行；标称频率属于超频，需核对 QVL 并验证稳定性。${why}` };
+  if (published && board.memoryMaxMTs && qvl && ram.jedecMTs >= target) return { status: 'PASS', factors, detail: `该料号、条数和 Rank 有主板 QVL，${target} MT/s 在已知范围内。` };
+  if (ram.jedecMTs && ram.jedecMTs < target) return { status: 'CONDITIONAL', factors, detail: `JEDEC ${ram.jedecMTs} MT/s。标称 ${target} MT/s 需核对 XMP/EXPO、主板 QVL 和稳定性。${why}` };
   // 在 CPU 官方上限内、不超过 2 条：频率本身在规格内；若为 XMP / EXPO 标称需在 BIOS 开启（条件项，不是未知项）
   // 主板内存上限未知时，只认定所有同平台主板普遍支持的频率（DDR4 ≤3200、DDR5 ≤6000）；更高频率仍需主板与 QVL
   const boardOk = board.memoryMaxMTs ? target <= board.memoryMaxMTs : target <= (/DDR4/i.test(ram.memoryType ?? '') ? 3200 : 6000);
-  if (published && target <= limit && boardOk && (ram.modules ?? 2) <= 2) return { status: 'CONDITIONAL', detail: `标称 ${target} MT/s，在 CPU 官方支持的 ${published} MT/s 以内。若内存为 XMP / EXPO 标称频率，需在 BIOS 开启；4 条或双面颗粒可能需要降频。` };
-  return { status: 'UNKNOWN', detail: `标称 ${target} MT/s，CPU 最高 ${published ?? '未知'} MT/s。需核对板卡、条数、Rank、JEDEC 配置和 QVL。` };
+  if (published && target <= limit && boardOk && (ram.modules ?? 2) <= 2) return { status: 'CONDITIONAL', factors, detail: `标称 ${target} MT/s，在 CPU 官方支持的 ${published} MT/s 以内。若为 XMP / EXPO 标称频率，需在 BIOS 开启；在规格内不等于保证稳定，4 条或双面颗粒可能需要降频。${why}` };
+  const reason = !published ? 'CPU 内存规格未知' : !boardOk ? `CPU 规格已知（${published} MT/s），但 ${target} MT/s 高于同平台主板普遍支持的频率，主板上限未录入` : '条数超过 2 条';
+  return { status: 'UNKNOWN', factors, detail: `标称 ${target} MT/s：${reason}，不能确认能以标称频率运行（不影响开机，最低按 JEDEC 频率运行）。${why}` };
 }
 
 export function psuFitCheck(psu, pc) {
@@ -88,33 +95,27 @@ export function measuredCooling(cpu, cooler, pc, board = {}, workload = {}) {
     t.caseAirflow === pc?.frontIntake && pc?.frontIntake && t.durationMinutes >= 20 &&
     (!workload.quiet || (t.noiseDbA != null && t.noiseDbA <= (workload.maxNoiseDbA ?? 35))));
 }
-/** 散热器尺寸档（工程近似）：0 未知 / 1 小型（≥120mm 塔或任意水冷）/ 2 中塔（≥145mm 或 240 水冷）/ 3 大塔（≥155mm 或 240+）/ 4 旗舰（≥158mm 双塔或 280+ 水冷） */
-export function coolerSizeClass(cooler) {
-  const r = cooler?.radiatorSizeMm ?? 0; const h = cooler?.heightMm ?? 0;
-  if (r >= 280 || h >= 158) return 4;
-  if (r >= 240 || h >= 155) return 3;
-  if (h >= 145) return 2;
-  if (r > 0 || h >= 120) return 1;
-  return 0;
-}
-/** 持续功耗需要的尺寸档：≤120W 小型，≤180W 中塔，≤250W 大塔，以上旗舰 */
-export const coolingClassFor = watts => (watts <= 120 ? 1 : watts <= 180 ? 2 : watts <= 250 ? 3 : 4);
-
-export function coolerThermalCheck(cpu, cooler, pc, board = {}, workload = {}) {
+// 2.2.2：删除 2.2.1 的 coolerSizeClass / coolingClassFor（按塔高、冷排尺寸推断散热功率）。
+// 塔高只用于机箱安装检查（coolerHeight）；散热能力只认 thermal-evidence.mjs 中的证据等级。
+export function coolerThermalCheck(cpu, cooler, pc, board = {}, workload = {}, { stock = false } = {}) {
   const watts = sustainedPower(cpu, board, workload);
-  if (!watts) return { status: 'UNKNOWN', detail: '缺少 CPU 持续负载功耗 / 主板功耗限制数据，不能确认持续散热。' };
-  const tested = measuredCooling(cpu, cooler, pc, board, workload);
-  if (tested) return { status: 'PASS', detail: `有同插槽、机箱进风条件下 ≥${watts}W、≥20 分钟的温度测试，环境 ≥${workload.ambientC ?? 25}°C；来源 ${tested.sourceUrl}` };
-  const rated = cooler?.vendorCoolingWatts;
+  if (!watts) return { status: 'UNKNOWN', critical: true, detail: '缺少 CPU 持续负载功耗 / 主板功耗限制数据，不能确认持续散热。', evidence: { type: 'incomplete' } };
   const limited = workload.cpuPowerLimitWatts ?? board.cpuPowerLimitWatts;
-  // 2.2.1：没有实测、也没有厂商标称时，按散热器尺寸档做工程判断（冷排越大、塔越高越强），结果为 CONDITIONAL
-  // （需满足条件：持续满载温度待实测），不是 PASS。尺寸档不足或厂商标称低于负载时保持 UNKNOWN。
-  const sizeClass = coolerSizeClass(cooler);
-  if (!(rated && watts > rated) && sizeClass >= coolingClassFor(watts)) {
-    return { status: 'CONDITIONAL', detail: `CPU 持续负载按 ${watts}W 校核${limited ? `（明确限制 ${limited}W，可能降低持续多核性能）` : ''}。${rated ? `散热器厂商标称 ${rated}W；` : ''}按散热器尺寸（${cooler?.radiatorSizeMm ? `${cooler.radiatorSizeMm}mm 冷排` : `塔高 ${cooler?.heightMm}mm`}）的工程判断足以覆盖此负载，但没有同平台持续温度实测，满载温度与噪音需实测确认。` };
+  const limitNote = limited ? `（按明确的功耗限制 ${limited}W，可能降低持续多核性能）` : '（按 CPU 官方最大睿频功耗 / PPT 保守校核）';
+  const tested = !stock && measuredCooling(cpu, cooler, pc, board, workload);
+  if (tested) return { status: 'PASS', critical: false, detail: `CPU 持续负载 ${watts}W${limitNote}。有同插槽、机箱进风条件下 ≥${watts}W、≥20 分钟的温度测试，环境 ≥${workload.ambientC ?? 25}°C；来源 ${tested.sourceUrl}`,
+    evidence: { type: 'measurement', coveredWatts: tested.powerWatts, sourceUrl: tested.sourceUrl } };
+  const cap = coolingCapacity(cooler ?? {}, { stock, cpu, quiet: workload.quiet, maxNoiseDbA: workload.maxNoiseDbA ?? 35 });
+  const evidence = { type: cap.level === 'measured' ? 'measurement' : cap.level === 'none' ? 'incomplete' : cap.level === 'vendor_rating' ? 'vendor-rating' : 'engineering-judgment',
+    level: cap.level, coveredWatts: cap.watts, requiredWatts: watts, sourceUrl: cap.sourceUrl, confidence: cap.confidence };
+  if (capacityCovers(cap, watts)) {
+    return { status: 'CONDITIONAL', critical: false, evidence,
+      detail: `CPU 持续负载 ${watts}W${limitNote}。依据：${cap.basis}${cap.sourceUrl ? `（${cap.sourceUrl}）` : ''}，覆盖 ${cap.watts}W。${cap.level === 'measured' ? '测试平台与本机机箱风道不同，' : ''}本机持续满载温度${workload.quiet ? '与噪音' : ''}仍需实测确认。` };
   }
-  return { status: limited && rated && watts <= rated && source(cooler?.coolingEvidence) ? 'CONDITIONAL' : 'UNKNOWN',
-    detail: `CPU 持续负载按 ${watts}W 校核${limited ? `（明确限制 ${limited}W，可能降低持续多核性能）` : '（未取得持续实测时保守使用峰值；主板实际功耗限制待核实）'}。${rated ? `散热器厂商标称 ${rated}W，不能等同于实测散热能力。` : ''}缺少相同插槽、环境温度和机箱风道下的持续温度${workload.quiet ? '及噪音' : ''}测试，不能确认散热通过。` };
+  const option = powerLimitOption(cap, cpu);
+  evidence.powerLimitOptionW = option;
+  return { status: 'UNKNOWN', critical: true, evidence,
+    detail: `CPU 持续负载 ${watts}W${limitNote}。${cap.level === 'none' ? `该散热器${cap.basis}` : `现有依据（${cap.basis}）只覆盖约 ${cap.level === 'vendor_rating' ? Math.min(cap.watts, VENDOR_RATING_MAX_W) : cap.watts}W${cap.level === 'vendor_rating' && watts > VENDOR_RATING_MAX_W ? `，高于 ${VENDOR_RATING_MAX_W}W 的持续负载必须有实测` : ''}`}，不能确认能压住 ${watts}W 持续负载（塔高 / 冷排尺寸不作为散热能力依据）。${option ? `可选运行条件：在 BIOS 将 CPU 持续功耗（PL1/PL2 或 PPT）限制到 ≤${option}W，多核性能会下降，幅度未量化；` : ''}或换用有覆盖 ${watts}W 实测证据的散热器。` };
 }
 export function caseThermalCheck(cpu, gpu, pc, board = {}, workload = {}) {
   const watts = sustainedPower(cpu, board, workload);
@@ -125,31 +126,95 @@ export function caseThermalCheck(cpu, gpu, pc, board = {}, workload = {}) {
     t.ambientC >= (workload.ambientC ?? 25) && t.durationMinutes >= 20 && t.withinLimits === true &&
     (!workload.quiet || (t.noiseDbA != null && t.noiseDbA <= (workload.maxNoiseDbA ?? 35))));
   if (test) return { status: 'PASS', detail: `有覆盖 CPU ${watts}W + GPU ${gpuW}W 的机箱持续温度${workload.quiet ? '与噪音' : ''}测试：${test.sourceUrl}`, critical: high };
-  if (!high && !workload.quiet && watts + gpuW <= 200 && pc?.frontIntake === 'mesh' &&
-    (pc.exhaustPositions?.length || pc.fanMounts?.some(m => m.position === 'rear'))) {
-    return { status: 'CONDITIONAL', critical: false, detail: `CPU + GPU 校核约 ${watts + gpuW}W，有网孔进风及排风安装位。保持进出风口畅通并确认后排风扇已安装。${pc.includedFans == null ? '预装数量未知，若没有风扇须另购并计入预算。' : ''} 依据为规格和工程判断。` };
+  // 2.2.2：风扇需求与附件成本共用 accessories.mjs 的同一规则；另购风扇费用已计入完整总价（不再写“未计入”）。
+  const need = requiredCaseFans(watts, gpuW);
+  const cap = fanMountCapacity(pc);
+  const included = pc?.includedFans;
+  const buy = Math.max(0, need.intake + need.exhaust - (included ?? 0));
+  const fanText = `至少 ${need.intake} 个进风 + ${need.exhaust} 个排风风扇${need.optionalTopExhaust ? '，建议再加顶部排风（可选，未计入）' : ''}；${included == null ? `预装数量未公布，按另购 ${buy} 个计入完整总价` : `预装 ${included} 个${buy ? `，另购 ${buy} 个已计入完整总价` : ''}`}`;
+  const basis = `依据为规格与工程判断，没有整机持续温度${workload.quiet ? '与噪音' : ''}实测。`;
+  if (cap) {
+    if (cap.intake < need.intake || cap.exhaust < need.exhaust) {
+      return { status: 'UNKNOWN', critical: high, detail: `CPU ${watts}W + GPU ${gpuW}W，共约 ${need.total}W：需要 ${need.intake} 进风 + ${need.exhaust} 排风，机箱已知风扇位只有进风 ${cap.intake} / 排风 ${cap.exhaust} 个，风道能力不足或数据不全，不能确认散热。` };
+    }
+    const meshNote = need.total > 450 ? (pc?.frontIntake === 'mesh' ? '前面板为网孔进风。' : '前面板进风结构（网孔 / 封闭玻璃）未公布：高负载下须确认为网孔或有足够侧进风开孔。') : '';
+    return { status: 'CONDITIONAL', critical: false, intakeKnown: pc?.frontIntake === 'mesh', detail: `CPU ${watts}W + GPU ${gpuW}W，共约 ${need.total}W。机箱风扇位进风 ${cap.intake} / 排风 ${cap.exhaust} 个，满足 ${fanText}。${meshNote}${basis}` };
   }
-  // 2.2.1：进 / 排风安装位已知（目录覆盖约一半机箱）时，按整机负载给出明确的风扇配置要求，记为 CONDITIONAL（工程判断，
-  // 持续温度待实测）。2.2.0 还要求“预装风扇数量”（覆盖 0/231）和整机实测，任何高功耗整机都无法满足，只能被剔除。
-  // 进排风位置未知时仍为 UNKNOWN（高功耗为阻断项）。
   const positions = pc?.intakePositions?.length && pc?.exhaustPositions?.length;
-  if (positions) {
-    const total = watts + gpuW;
-    const intake = total <= 250 ? 1 : total <= 450 ? 2 : 3;
-    return { status: 'CONDITIONAL', critical: high,
-      detail: `CPU ${watts}W + GPU ${gpuW}W，共约 ${total}W。机箱有前进风、后排风安装位：至少需要 ${intake} 个进风 + 1 个排风风扇${total > 450 ? '，建议再加顶部排风' : ''}。${pc.includedFans == null ? '预装风扇数量未公布，不足时需另购（未计入总价）。' : `预装 ${pc.includedFans} 个。`}依据为规格与工程判断，没有整机持续温度${workload.quiet ? '与噪音' : ''}实测。` };
+  if (positions && !high) {
+    return { status: 'CONDITIONAL', critical: false, detail: `CPU ${watts}W + GPU ${gpuW}W，共约 ${need.total}W。机箱有进风、排风安装位（数量未公布）：${fanText}。${basis}` };
   }
-  const layout = pc?.frontIntake && pc?.intakePositions?.length && pc?.exhaustPositions?.length && pc?.includedFans != null;
-  return { status: layout && !high && !workload.quiet ? 'CONDITIONAL' : 'UNKNOWN', critical: high,
-    detail: `${high ? '高功耗' : '此'}配置（CPU ${watts ?? '?'}W + GPU ${gpuW}W）：${layout ? `已知进排风布局及预装 ${pc.includedFans} 个风扇，仍需核对风扇配置和持续温度。` : '缺少完整进排风、风扇数量或安装布局数据。'}没有覆盖此负载的整机散热${workload.quiet ? '和噪音' : ''}测试，不能仅凭显卡限长判断通过。${pc?.requiredFanCostCents == null ? '额外风扇成本待核实。' : ''}` };
+  return { status: 'UNKNOWN', critical: high,
+    detail: `${high ? '高功耗' : '此'}配置（CPU ${watts}W + GPU ${gpuW}W）：${positions ? '机箱风扇位数量未公布，高负载下不能确认能装下所需风扇。' : '缺少进排风安装位数据。'}需要 ${need.intake} 进风 + ${need.exhaust} 排风；没有覆盖此负载的整机散热测试。` };
 }
 
 // Full chain = endpoint ∩ CPU controller ∩ board electrical link. Missing data
 // stays unknown; the old single pcieGen field cannot prove an x16 electrical link.
-export function pcieLink(cpu = {}, board = {}, device = {}, { storage = false } = {}) {
+/**
+ * M.2 插槽级模型（2.2.2）。主板 m2Links 每项规范化为：
+ *   slot_id、source（CPU / PCH）、pcie_generation、electrical_lanes、supported_protocols（NVME / SATA）、
+ *   supported_lengths（2242 / 2260 / 2280 / 22110）、shared_lanes（与哪些接口共享）、disabled_ports（占用后禁用的 SATA 等）、
+ *   cpu_dependent_limits（[{ cpuPattern, effect: 'disabled' | { gen, lanes } }]）
+ */
+export function m2Slots(board = {}, cpuName = '') {
+  return (board.m2Links ?? []).map((l, i) => {
+    const limits = l.cpuDependentLimits ?? l.cpu_dependent_limits ?? [];
+    const hit = limits.find(x => x.cpuPattern && new RegExp(x.cpuPattern, 'i').test(cpuName));
+    return {
+      slot_id: l.slot ?? l.slot_id ?? `M.2_${i + 1}`, source: l.source ?? null,
+      pcie_generation: hit?.effect?.gen ?? l.gen ?? l.pcie_generation ?? null, electrical_lanes: hit?.effect?.lanes ?? l.lanes ?? l.electrical_lanes ?? null,
+      supported_protocols: l.protocols ?? l.supported_protocols ?? (l.protocol ? [l.protocol] : []), supported_lengths: l.lengths ?? l.supported_lengths ?? [],
+      shared_lanes: l.sharedLanes ?? l.shared_lanes ?? [], disabled_ports: l.disabledPorts ?? l.disabled_ports ?? [],
+      disabledByCpu: hit?.effect === 'disabled',
+    };
+  });
+}
+
+/** SSD 预计协商链路：SSD 端点 ∩ 插槽电气规格 ∩ 上游控制器（CPU 直连槽取 CPU 存储链路；芯片组槽取插槽自身，另提示与芯片组上行共享） */
+export function storageLink(cpu = {}, board = {}, ssd = {}, { cpuName = '' } = {}) {
+  const end = ssd.pcieLink;
+  const protocol = ssd.m2Protocol ?? (/SATA/i.test(ssd.interface ?? '') && !/PCIE|NVME/i.test(ssd.interface ?? '') ? 'SATA' : 'NVME');
+  const slots = m2Slots(board, cpuName);
+  const missing = [];
+  if (protocol === 'NVME' && !end) missing.push('SSD 端点 PCIe 版本 / 通道');
+  if (!slots.length) missing.push(`主板 M.2 插槽级数据（${board.m2Slots ? `目录只记录了 ${board.m2Slots} 个 M.2 接口，没有每个插槽的来源、代数与通道` : '插槽数量与规格'}）`);
+  if (!slots.length) return { status: 'UNKNOWN', missing, detail: `无法计算 SSD 链路，缺少：${missing.join('；')}。` };
+  const usable = slots.filter(sl => !sl.disabledByCpu && (!sl.supported_protocols.length || sl.supported_protocols.includes(protocol)) &&
+    (!ssd.m2Length || !sl.supported_lengths.length || sl.supported_lengths.includes(ssd.m2Length)));
+  if (!usable.length) return { status: 'FAIL', detail: `主板已知 M.2 插槽都不支持该 SSD（${protocol}${ssd.m2Length ? `、${ssd.m2Length}` : ''}${slots.some(sl => sl.disabledByCpu) ? '；部分插槽在此 CPU 下不可用' : ''}）。` };
+  if (protocol === 'SATA') return { status: 'CONDITIONAL', detail: `M.2 SATA SSD 可用 ${usable.map(u => u.slot_id).join(' / ')}；${usable.some(u => u.disabled_ports.length) ? `占用后禁用 ${usable.flatMap(u => u.disabled_ports).join('、')}` : '需核对是否与 SATA 口共享'}。` };
+  const controllerFor = sl => (String(sl.source ?? '').toUpperCase() === 'CPU' ? cpu.storagePcieLink : sl.pcie_generation ? { gen: sl.pcie_generation, lanes: sl.electrical_lanes } : null);
+  const rate = sl => { const c = controllerFor(sl); return c && end && sl.pcie_generation ? Math.min(end.gen, sl.pcie_generation, c.gen) * Math.min(end.lanes, sl.electrical_lanes, c.lanes) : -1; };
+  const best = usable.reduce((a, b) => (rate(b) > rate(a) || (rate(b) === rate(a) && b.source === 'CPU' && a.source !== 'CPU') ? b : a));
+  const controller = controllerFor(best);
+  if (!controller) missing.push(String(best.source).toUpperCase() === 'CPU' ? 'CPU 直连 M.2 链路规格' : '插槽代数 / 通道');
+  if (!best.pcie_generation || !best.electrical_lanes) missing.push(`${best.slot_id} 代数 / 通道`);
+  if (missing.length) return { status: 'UNKNOWN', missing, detail: `无法计算 SSD 链路，缺少：${[...new Set(missing)].join('；')}。` };
+  const gen = Math.min(end.gen, best.pcie_generation, controller.gen);
+  const lanes = Math.min(end.lanes, best.electrical_lanes, controller.lanes);
+  const constrained = gen < end.gen || lanes < end.lanes;
+  const shared = [...best.shared_lanes, ...(board.laneSharing ?? [])];
+  const pch = String(best.source ?? '').toUpperCase() !== 'CPU';
+  return { status: constrained || shared.length || pch ? 'CONDITIONAL' : 'PASS', gen, lanes, slot: best.slot_id,
+    detail: `预计协商链路 PCIe ${gen}.0 ×${lanes}（${best.slot_id}${best.source ? `，${best.source} 直连` : ''}；理论值，非装机实测）；SSD 支持 ${end.gen}.0 ×${end.lanes}。${constrained ? '链路低于 SSD 规格，顺序读写上限降低。' : ''}${pch ? '芯片组插槽与其他芯片组设备共享上行带宽。' : ''}${shared.length ? `通道共享：${shared.join('；')}` : ''}` };
+}
+
+export function pcieLink(cpu = {}, board = {}, device = {}, { storage = false, cpuName = '' } = {}) {
+  if (storage) return storageLink(cpu, board, device, { cpuName });
   const end = device.pcieLink;
-  const slot = storage ? board.m2Links?.find(s => s.protocol === 'NVME') : board.gpuPcieLink;
   const controller = storage ? cpu.storagePcieLink : cpu.pcieLink;
+  const nvmeSlots = storage ? (board.m2Links ?? []).filter(s => s.protocol === 'NVME') : [];
+  const slot = storage
+    ? nvmeSlots.reduce((best, s) => {
+      if (!best) return s;
+      const bw = x => Math.min(end?.gen ?? 7, x.gen, controller?.gen ?? 7) * Math.min(end?.lanes ?? 4, x.lanes, controller?.lanes ?? 16);
+      const d = bw(s) - bw(best);
+      if (d !== 0) return d > 0 ? s : best;
+      const raw = s.gen * s.lanes - best.gen * best.lanes;
+      if (raw !== 0) return raw > 0 ? s : best;
+      return s.source === 'CPU' && best.source !== 'CPU' ? s : best;
+    }, null)
+    : board.gpuPcieLink;
   if (storage && board.m2Links?.length && !slot && end) return { status: 'FAIL', detail: '主板已知 M.2 插槽只支持 SATA，所选 SSD 需要 NVMe / PCIe 协议。' };
   if (!storage && end?.physicalLanes && slot?.physicalLanes && end.physicalLanes > slot.physicalLanes) return { status: 'FAIL', detail: '显卡物理连接器长于主板已知的封闭插槽，无法安装；电气通道限制另行计算。' };
   if (!end || !slot || !controller) return { status: 'UNKNOWN', detail: `缺少 ${storage ? 'M.2' : '显卡'}链路端点、CPU 控制器或主板电气通道数据。` };
@@ -159,8 +224,9 @@ export function pcieLink(cpu = {}, board = {}, device = {}, { storage = false } 
   const lanes = Math.min(...all.map(l => l.lanes));
   const constrained = gen < end.gen || lanes < end.lanes;
   const sharing = board.laneSharing?.length;
+  const slotNote = storage && slot.slot ? `（首选 ${slot.slot}${slot.source ? `，${slot.source} 直连` : ''}）` : '';
   return { status: constrained || sharing ? 'CONDITIONAL' : 'PASS', gen, lanes,
-    detail: `实际链路 PCIe ${gen}.0 ×${lanes}；设备支持 ${end.gen}.0 ×${end.lanes}。${end.lanes <= 8 && constrained ? '通道较少的显卡 / SSD 在旧平台带宽受限，可能影响表现，未推断精确性能损失。' : ''}${sharing ? `需核对通道共享：${board.laneSharing.join('；')}` : ''}` };
+    detail: `实际链路 PCIe ${gen}.0 ×${lanes}${slotNote}；设备支持 ${end.gen}.0 ×${end.lanes}。${end.lanes <= 8 && constrained ? '通道较少的显卡 / SSD 在旧平台带宽受限，可能影响表现，未推断精确性能损失。' : ''}${sharing ? `需核对通道共享：${board.laneSharing.join('；')}` : ''}` };
 }
 
 // Additional persisted fields. Nested evidence is bounded JSON and is consumed
@@ -168,8 +234,13 @@ export function pcieLink(cpu = {}, board = {}, device = {}, { storage = false } 
 export const HARDWARE_DETAIL_FIELDS = ['supportedBoardFormats', 'basePowerWatts', 'sustainedPowerWatts', 'cpuPowerLimitWatts', 'pcieLink', 'storagePcieLink', 'gpuPcieLink', 'm2Links', 'laneSharing', 'vendorCoolingWatts', 'coolingEvidence', 'thermalTests', 'frontIntake', 'intakePositions', 'exhaustPositions', 'includedFans', 'fanSizesMm', 'requiredFanCostCents', 'maxGpuHeightMm', 'maxGpuThicknessMm', 'expansionSlots', 'gpuCableClearanceMm', 'requiredCableClearanceMm', 'supportedPsuFormats', 'maxPsuLengthMm', 'psuLengthMm', 'psuFormFactor', 'radiatorPositions', 'radiatorConflicts', 'thicknessMm', 'slotWidth', 'specEvidence', 'workload'];
 HARDWARE_DETAIL_FIELDS.push('pcieGeneration', 'fanMounts', 'psuWidthMm', 'psuHeightMm', 'psuAtxBracketIncluded',
   'supportsPsuAtxAdapter', 'requiredPsuBracketCostCents', 'psuGpuCableMm', 'psuCpuCableMm', 'psuBoardCableMm',
-  'gpuCablePathMm', 'cpuCablePathMm', 'boardCablePathMm', 'cpuMemoryMaxMTs', 'cpuMemoryByModules', 'memoryMaxMTs',
-  'rank', 'jedecMTs', 'memoryQvl', 'stockCoolerIncluded', 'stockCoolerRetailSkus', 'retailCoolerName', 'native16PinCableWatts');
+  'gpuCablePathMm', 'cpuCablePathMm', 'boardCablePathMm', 'cpuMemoryMaxMTs', 'cpuMemoryByModules', 'cpuMemoryMaxMTsByType', 'memoryMaxMTs',
+  'rank', 'jedecMTs', 'memoryQvl', 'stockCoolerIncluded', 'stockCoolerRetailSkus', 'retailCoolerName', 'native16PinCableWatts',
+  'rebarSupport', 'biosFlashback', 'biosVersion',
+  // 2.2.2：电源版本与接口、散热结构证据、SSD 规范化、16pin 线材与冷排空间
+  'manufacturerModel', 'manufacturerSku', 'hardwareRevision', 'electricalStandard', 'native12vhpwr', 'native12v2x6', 'connectorPowerRating',
+  'pcie8pinConnectors', 'independentPcieCables', 'cableSource', 'adapterIncluded', 'heatPipes', 'radiatorThicknessMm', 'bitsPerCell',
+  'powerConnectorPosition', 'gpuLengthIncludesFrontFans', 'topRadiatorClearanceMm');
 export function hardwareDetails(input) {
   const out = {};
   for (const key of HARDWARE_DETAIL_FIELDS) if (input[key] !== undefined) {
@@ -179,7 +250,17 @@ export function hardwareDetails(input) {
     if (typeof value === 'number' && (!Number.isFinite(value) || value < 0 || value > 1000000)) throw new Error(`${key} 数值无效`);
     if (key !== 'fanSizesMm' && /Watts$|Mm$|Slots$|Fans$|Cents$|MTs$|slotWidth/.test(key) && typeof value !== 'number') throw new Error(`${key} 必须是数值`);
     if (key.endsWith('Cents') && !Number.isSafeInteger(value)) throw new Error(`${key} 必须为整数分`);
-    if (['stockCoolerIncluded', 'psuAtxBracketIncluded', 'supportsPsuAtxAdapter'].includes(key) && typeof value !== 'boolean') throw new Error(`${key} 必须为布尔值`);
+    if (['stockCoolerIncluded', 'psuAtxBracketIncluded', 'supportsPsuAtxAdapter', 'biosFlashback'].includes(key) && typeof value !== 'boolean') throw new Error(`${key} 必须为布尔值`);
+    if (key === 'rebarSupport' && typeof value !== 'boolean' && value !== 'bios-update') throw new Error('rebarSupport 必须为布尔值或 bios-update');
+    if (key === 'biosVersion' && typeof value !== 'string') throw new Error('biosVersion 必须是字符串');
+    if (['manufacturerModel', 'manufacturerSku', 'hardwareRevision', 'electricalStandard', 'cableSource'].includes(key) && (typeof value !== 'string' || value.length > 200)) throw new Error(`${key} 必须是字符串`);
+    if (['native12vhpwr', 'native12v2x6', 'adapterIncluded', 'gpuLengthIncludesFrontFans'].includes(key) && typeof value !== 'boolean') throw new Error(`${key} 必须为布尔值`);
+    if (['connectorPowerRating', 'pcie8pinConnectors', 'independentPcieCables', 'heatPipes', 'bitsPerCell'].includes(key) && !Number.isSafeInteger(value)) throw new Error(`${key} 必须为整数`);
+    if (key === 'connectorPowerRating' && ![150, 300, 450, 600].includes(value)) throw new Error('16pin 线材额定只能是 150 / 300 / 450 / 600W');
+    if (key === 'bitsPerCell' && (value < 1 || value > 4)) throw new Error('bitsPerCell 只能是 1–4');
+    if (key === 'powerConnectorPosition' && !['top', 'end'].includes(value)) throw new Error('powerConnectorPosition 只能是 top / end');
+    if (key === 'cpuMemoryMaxMTsByType' && (!value || typeof value !== 'object' || Array.isArray(value) ||
+      !Object.entries(value).every(([k, rate]) => /^DDR[45]$/i.test(k) && Number.isSafeInteger(rate) && rate > 0))) throw new Error('CPU 内存类型上限无效');
     if (['fanMounts', 'memoryQvl', 'stockCoolerRetailSkus', 'fanSizesMm'].includes(key) && !Array.isArray(value)) throw new Error(`${key} 必须为数组`);
     if (key === 'fanMounts' && !value.every(m => m && ['front', 'top', 'rear', 'side', 'bottom'].includes(m.position) &&
       Number.isSafeInteger(m.count) && m.count > 0 && [80, 92, 120, 140, 180, 200].includes(m.sizeMm))) throw new Error('风扇安装位无效');

@@ -8,7 +8,7 @@ export function validateWorkload(input = {}, scenario = 'office') {
   if (!WORKLOAD_TASKS[scenario]?.includes(task)) throw new Error('细分任务与一级场景不匹配');
   const out = { task };
   for (const k of ['game', 'quality', 'material', 'model', 'benchmarkId']) if (input[k] != null) { if (typeof input[k] !== 'string' || input[k].length > 100) throw new Error(`${k} 无效`); out[k] = input[k]; }
-  for (const [k, lo, hi] of [['targetFps', 1, 1000], ['minVramGB', 1, 512], ['minSsdGB', 128, 16000], ['ambientC', 0, 50], ['cpuPowerLimitWatts', 10, 1000], ['maxNoiseDbA', 15, 60]]) if (input[k] != null) {
+  for (const [k, lo, hi] of [['targetFps', 1, 1000], ['minVramGB', 1, 512], ['minSsdGB', 128, 16000], ['minRamGB', 4, 1024], ['ambientC', 0, 50], ['cpuPowerLimitWatts', 10, 1000], ['maxNoiseDbA', 15, 60]]) if (input[k] != null) {
     if (!Number.isFinite(input[k]) || input[k] < lo || input[k] > hi) throw new Error(`${k} 无效`); out[k] = input[k];
   }
   return out;

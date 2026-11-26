@@ -1,6 +1,6 @@
 {
-  "version": "2.2.0",
-  "verifiedOn": "2026-11-25",
+  "version": "2.2.2",
+  "verifiedOn": "2026-11-26",
   "records": [
     {
       "id": "zol-1948423",
@@ -155,7 +155,7 @@
     {
       "id": "zol-1980547",
       "sourceUrl": "https://www.deepcool.com/products/Cooling/cpuaircoolers/AG500-Performance-CPU-Cooler-1851-1700-AM5/2022/16250.shtml",
-      "reason": "厂商标称 240W，不是持续负载温度实测，不能据此直接 PASS；确认原型号 GP-Z-AG500，不扩散到 ARGB 变体。",
+      "reason": "厂商标称 240W，不是持续负载温度实测，不能据此直接 PASS；确认原型号 GP-Z-AG500，不扩散到 ARGB 变体。 2026-11-26 复核官网：“240W of heat dissipation performance”，热管 Ø6mm×5（ZOL 记为 6 个，以官网为准），P/N R-AG500-BKNNMN-G。",
       "specs": {
         "vendorCoolingWatts": 240,
         "heightMm": 155,
@@ -163,7 +163,8 @@
           "kind": "vendor-rated",
           "sourceUrl": "https://www.deepcool.com/products/Cooling/cpuaircoolers/AG500-Performance-CPU-Cooler-1851-1700-AM5/2022/16250.shtml",
           "confidence": "medium"
-        }
+        },
+        "heatPipes": 5
       }
     },
     {
@@ -239,10 +240,251 @@
     {
       "id": "zol-2162063",
       "sourceUrl": "https://www.intel.com/content/www/us/en/products/sku/245692/intel-core-ultra-7-processor-270k-plus-36m-cache-up-to-5-50-ghz/specifications.html",
-      "reason": "DDR5 7200 为官方最高规格，不能推断任意 DIMM 配置。",
+      "reason": "DDR5 7200 为官方最高规格，支持 PCIe 5.0 x16 显卡及 PCIe 5.0 x4 直连 M.2，盒装不附带散热器。 Intel ARK：Processor Base Power 125W、Maximum Turbo Power 250W（2026-11-26 核对）。",
       "specs": {
         "cpuMemoryMaxMTs": 7200,
+        "cpuMemoryMaxMTsByType": {
+          "DDR5": 7200
+        },
+        "pcieLink": {
+          "gen": 5,
+          "lanes": 16
+        },
+        "storagePcieLink": {
+          "gen": 5,
+          "lanes": 4
+        },
+        "stockCoolerIncluded": false,
+        "basePowerWatts": 125,
+        "maxPowerWatts": 250
+      }
+    },
+    {
+      "id": "zol-2162061",
+      "sourceUrl": "https://www.intel.com/content/www/us/en/ark.html",
+      "reason": "Core Ultra 5 250K Plus 官方 LGA1851 平台规格：DDR5 7200 MT/s、PCIe 5.0 x16 + M.2 PCIe 5.0 x4、K 系列盒装不附带散热器。",
+      "specs": {
+        "cpuMemoryMaxMTs": 7200,
+        "cpuMemoryMaxMTsByType": {
+          "DDR5": 7200
+        },
+        "pcieLink": {
+          "gen": 5,
+          "lanes": 16
+        },
+        "storagePcieLink": {
+          "gen": 5,
+          "lanes": 4
+        },
         "stockCoolerIncluded": false
+      }
+    },
+    {
+      "id": "zol-2179677",
+      "sourceUrl": "https://www.intel.com/content/www/us/en/products/sku/245689/intel-core-ultra-5-processor-250kf-plus-30m-cache-up-to-5-30-ghz/specifications.html",
+      "reason": "Intel ARK（2026-11-26 核对）：Memory Types Up To DDR5 7200 MT/s，Base Power 125W，Maximum Turbo Power 159W，PCIe 5.0 and 4.0；KF 无核显。是否附带散热器 ARK 未写，K/KF 系列按不附带处理。",
+      "specs": {
+        "cpuMemoryMaxMTs": 7200,
+        "cpuMemoryMaxMTsByType": {
+          "DDR5": 7200
+        },
+        "pcieLink": {
+          "gen": 5,
+          "lanes": 16
+        },
+        "storagePcieLink": {
+          "gen": 5,
+          "lanes": 4
+        },
+        "integratedGraphics": "不支持",
+        "stockCoolerIncluded": false,
+        "basePowerWatts": 125,
+        "maxPowerWatts": 159
+      }
+    },
+    {
+      "id": "buildcores-4287f1fa-24a0-47ba-8248-2ec9c27975d8",
+      "sourceUrl": "https://www.msi.com/Motherboard/B650M-GAMING-WIFI/Specification",
+      "reason": "微星 B650M GAMING WIFI 官方规格：双 CPU 直连 PCIe 4.0 x4 M.2（Ryzen 8500/8300 系列 M2_2 不可用），支持 Flash BIOS Button 与 ReBAR。",
+      "specs": {
+        "m2Links": [
+          {
+            "slot": "M2_1",
+            "source": "CPU",
+            "protocol": "NVME",
+            "gen": 4,
+            "lanes": 4
+          },
+          {
+            "slot": "M2_2",
+            "source": "CPU",
+            "protocol": "NVME",
+            "gen": 4,
+            "lanes": 4,
+            "cpuDependentLimits": [
+              {
+                "cpuPattern": "RYZENs*[35]s*8[35]00",
+                "effect": "disabled"
+              }
+            ]
+          }
+        ],
+        "biosFlashback": true,
+        "rebarSupport": true,
+        "laneSharing": []
+      }
+    },
+    {
+      "id": "buildcores-6efb715c-74b5-4f50-8948-46069e4e1307",
+      "sourceUrl": "https://www.gigabyte.com/Motherboard/B860M-AORUS-ELITE-WIFI6E-ICE/sp",
+      "reason": "技嘉 B860M AORUS ELITE WIFI6E ICE 官方规格：1×CPU 直连 PCIe 5.0 x4 M.2 + 2×PCH PCIe 4.0 x4 M.2，支持 Q-Flash Plus 与 ReBAR。",
+      "specs": {
+        "m2Links": [
+          {
+            "slot": "M2A_CPU",
+            "source": "CPU",
+            "protocol": "NVME",
+            "gen": 5,
+            "lanes": 4
+          },
+          {
+            "slot": "M2Q_SB",
+            "source": "PCH",
+            "protocol": "NVME",
+            "gen": 4,
+            "lanes": 4
+          },
+          {
+            "slot": "M2N_SB",
+            "source": "PCH",
+            "protocol": "NVME",
+            "gen": 4,
+            "lanes": 4
+          }
+        ],
+        "biosFlashback": true,
+        "rebarSupport": true
+      }
+    },
+    {
+      "id": "zol-1294115",
+      "sourceUrl": "https://www.msi.com/Motherboard/X470-GAMING-PLUS-MAX/Specification",
+      "reason": "微星 X470 GAMING PLUS MAX 官方规格：M2_1 为 PCIe 3.0 x4/SATA，M2_2 为 PCIe 2.0 x4；支持 Flash BIOS Button，更新 AGESA BIOS 后支持 ReBAR。",
+      "specs": {
+        "m2Links": [
+          {
+            "slot": "M2_1",
+            "source": "CPU",
+            "protocol": "NVME",
+            "gen": 3,
+            "lanes": 4
+          },
+          {
+            "slot": "M2_2",
+            "source": "PCH",
+            "protocol": "NVME",
+            "gen": 2,
+            "lanes": 4
+          }
+        ],
+        "biosFlashback": true,
+        "rebarSupport": "bios-update"
+      }
+    },
+    {
+      "id": "zol-1204751",
+      "sourceUrl": "https://www.gigabyte.com/Motherboard/GA-A320M-S2H-rev-1x/sp",
+      "reason": "技嘉 GA-A320M-S2H 官方规格：1×M.2（PCIe 3.0 x4/SATA）；后期 BIOS 更新提供 ReBAR 支持。",
+      "specs": {
+        "m2Links": [
+          {
+            "slot": "M2A_SOCKET",
+            "source": "CPU",
+            "protocol": "NVME",
+            "gen": 3,
+            "lanes": 4
+          }
+        ],
+        "rebarSupport": "bios-update"
+      }
+    },
+    {
+      "id": "zol-1631527",
+      "sourceUrl": "https://www.colorful.cn/",
+      "reason": "七彩虹 H610M-K M.2 V20 官方规格：1×M.2（PCIe 3.0 x4/SATA，插 SATA M.2 时占用 SATA4）；支持 ReBAR。",
+      "specs": {
+        "m2Links": [
+          {
+            "slot": "M2_1",
+            "source": "PCH",
+            "protocol": "NVME",
+            "gen": 3,
+            "lanes": 4
+          }
+        ],
+        "rebarSupport": true,
+        "laneSharing": [
+          "M.2 插槽使用 SATA 模式 SSD 时 SATA4 接口不可用"
+        ]
+      }
+    },
+    {
+      "id": "zol-2099261",
+      "sourceUrl": "https://www.asus.com/motherboards-components/motherboards/tuf-gaming/tuf-gaming-b760m-plus-ii/techspec/",
+      "reason": "华硕 TUF GAMING B760M-PLUS II 官方规格：3×M.2（M.2_1 CPU PCIe 4.0 x4、M.2_2 PCH PCIe 4.0 x4、M.2_3 PCH PCIe 4.0 x2），支持 ReBAR。",
+      "specs": {
+        "m2Links": [
+          {
+            "slot": "M.2_1",
+            "source": "CPU",
+            "protocol": "NVME",
+            "gen": 4,
+            "lanes": 4
+          },
+          {
+            "slot": "M.2_2",
+            "source": "PCH",
+            "protocol": "NVME",
+            "gen": 4,
+            "lanes": 4
+          },
+          {
+            "slot": "M.2_3",
+            "source": "PCH",
+            "protocol": "NVME",
+            "gen": 4,
+            "lanes": 2
+          }
+        ],
+        "rebarSupport": true
+      }
+    },
+    {
+      "id": "zol-1999756",
+      "sourceUrl": "https://www.huntkey.com.cn/",
+      "reason": "航嘉 GX750A 掠夺者官方参数：双层 Mesh 铁网前面板进风，支持 ATX/M-ATX/ITX，顶置 360mm 水冷，显卡限长 415mm，散热限高 165mm。",
+      "specs": {
+        "frontIntake": "mesh",
+        "supportedBoardFormats": [
+          "ATX",
+          "MICRO ATX",
+          "MINI-ITX"
+        ],
+        "maxBoardFormFactor": "ATX",
+        "maxGpuLengthMm": 415,
+        "maxCoolerHeightMm": 165,
+        "maxRadiatorMm": 360,
+        "expansionSlots": 7,
+        "radiatorPositions": [
+          {
+            "position": "top",
+            "sizesMm": [
+              120,
+              240,
+              360
+            ]
+          }
+        ]
       }
     },
     {
@@ -275,6 +517,83 @@
           "100-100000592SBX"
         ],
         "retailCoolerName": "Wraith Prism"
+      }
+    },
+    {
+      "id": "zol-1425886",
+      "sourceUrl": "https://news.samsung.com/us/samsung-adds-4tb-capacity-to-990-pro-series/",
+      "reason": "三星官方 990 PRO 规格表 Storage Memory 为 “Samsung V-NAND 3-bit TLC”；ZOL 标为“MLC多层单元”是把三星旧称 3-bit MLC 误归为 2-bit MLC。保留原始术语，按 bitsPerCell=3 计分。",
+      "specs": {
+        "bitsPerCell": 3,
+        "nand": "TLC"
+      }
+    },
+    {
+      "id": "zol-1425887",
+      "sourceUrl": "https://news.samsung.com/us/samsung-adds-4tb-capacity-to-990-pro-series/",
+      "reason": "三星官方 990 PRO 规格表 Storage Memory 为 “Samsung V-NAND 3-bit TLC”；ZOL 标为“MLC多层单元”是把三星旧称 3-bit MLC 误归为 2-bit MLC。保留原始术语，按 bitsPerCell=3 计分。",
+      "specs": {
+        "bitsPerCell": 3,
+        "nand": "TLC"
+      }
+    },
+    {
+      "id": "zol-1425890",
+      "sourceUrl": "https://news.samsung.com/us/samsung-adds-4tb-capacity-to-990-pro-series/",
+      "reason": "三星官方 990 PRO 规格表 Storage Memory 为 “Samsung V-NAND 3-bit TLC”；ZOL 标为“MLC多层单元”是把三星旧称 3-bit MLC 误归为 2-bit MLC。保留原始术语，按 bitsPerCell=3 计分。",
+      "specs": {
+        "bitsPerCell": 3,
+        "nand": "TLC"
+      }
+    },
+    {
+      "id": "zol-1359260",
+      "sourceUrl": "https://detail.zol.com.cn/1360/1359260/param.shtml",
+      "reason": "目录条目为长城 G13 GW-ATX1300BL 旧版本：ZOL 参数为 8 个显卡 8pin、150×150×86mm、未标 ATX 版本；与长城官网 G13MG（料号 5194268，ATX3.1，6 个 6+2pin + 2 个 PCIe 5.1，140×150×86mm，https://www.gwpst.cn/product/detail/257.html）尺寸和接口不同，不能合并为同一产品。原生 16pin 是否存在未知（ZOL 未列 16pin 字段，不据此判定为没有）。",
+      "specs": {
+        "manufacturerModel": "GW-ATX1300BL",
+        "hardwareRevision": "G13（旧版，未标 ATX 版本）",
+        "pcie8pinConnectors": 8,
+        "cableSource": "原厂模组线"
+      }
+    },
+    {
+      "id": "gw-g13mg-5194268",
+      "mpn": [
+        "GW-ATX1300BL",
+        "GW-ATX1300BL G13MG"
+      ],
+      "requiresRevision": [
+        "G13MG",
+        "5194268"
+      ],
+      "sourceUrl": "https://www.gwpst.cn/product/detail/257.html",
+      "reason": "长城官网 GW-ATX1300BL G13MG（G13金模 ATX3.1）：料号 5194268，1300W，80PLUS 金牌，PCI-E 6+2 接口 6 个，PCIe 5.1 接口 2 个（线长 675mm），140×150×86mm。官网未写 PCIe 5.1 线材额定功率与独立线数量。只应用于能确认为 G13MG / 5194268 的条目。",
+      "specs": {
+        "manufacturerModel": "GW-ATX1300BL G13MG",
+        "manufacturerSku": "5194268",
+        "hardwareRevision": "G13MG",
+        "electricalStandard": "ATX 3.1",
+        "atxVersion": "3.1",
+        "ratedWatts": 1300,
+        "native12v2x6": true,
+        "pin16Count": 2,
+        "pcie8pinConnectors": 6,
+        "pcie8Count": 6,
+        "cableSource": "原厂模组线",
+        "psuLengthMm": 140,
+        "psuFormFactor": "ATX"
+      }
+    },
+    {
+      "id": "zol-2170268",
+      "sourceUrl": "https://detail.zol.com.cn/2171/2170268/param.shtml",
+      "reason": "ZOL 型号为 GP-EG1000PM PG5（猎鹰白金 1000PG5），与技嘉 GP-AE1000PM PG5 Rev 2.0（官网列原生 16pin）型号代码不同，不能按同名合并。技嘉官网拒绝自动访问（HTTP 403），GP-EG1000PM 的原生 12V-2x6 与 Rev 版本未能核实，保持未知。",
+      "specs": {
+        "manufacturerSku": "GP-EG1000PM PG5",
+        "hardwareRevision": "未确认",
+        "electricalStandard": "ATX 3.1",
+        "pcie8pinConnectors": 6
       }
     }
   ]

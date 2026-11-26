@@ -99,7 +99,10 @@ function FeasibleCard({ plan, budgetCents, scenarios, onChoose }: { plan: PlanRe
       </header>
 
       <div className="nx-plan-hero">
-        <div className="nx-plan-price"><span>预计总价</span><strong>{formatYuan(plan.totalCents)}</strong><BudgetLine plan={plan} budgetCents={budgetCents} totalCents={plan.totalCents} /></div>
+        <div className="nx-plan-price"><span>预计总价</span><strong>{formatYuan(plan.totalCents)}</strong><BudgetLine plan={plan} budgetCents={budgetCents} totalCents={plan.totalCents} />
+          {plan.costBreakdown && plan.costBreakdown.requiredAccessoriesCents > 0 && (
+            <p className="nx-plan-budget">含必需附件 {formatYuan(plan.costBreakdown.requiredAccessoriesCents)}（八件套 {formatYuan(plan.costBreakdown.coreCents)}）{plan.costBreakdown.accessoryPriceStatus !== 'known' ? ` · 附件为估算价，完整价 ${formatYuan(plan.costBreakdown.estimatedRangeCents[0])}–${formatYuan(plan.costBreakdown.estimatedRangeCents[1])}` : ''}</p>
+          )}</div>
         <Thumb src={hero?.imageUrl} slot={plan.igpu ? 'cpu' : 'gpu'} size="xl" />
       </div>
 

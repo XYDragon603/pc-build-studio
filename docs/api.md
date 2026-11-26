@@ -178,6 +178,8 @@ npm run catalog:import
 - `strategy`：`value` 性价比优先 / `balanced` 均衡推荐（默认）/ `performance` 预算内性能优先（2.2.1：前两者以场景综合评分减成本为目标，后者先最大化工作负载核心性能）。
 - `workload.minVramGB`、`workload.minSsdGB`（2.2.1）：显存 / 硬盘最低容量，软约束，达不到时方案的 `unmetRequirements` 标明。
 - `allowModified`（2.2.1，默认 `false`）：允许非原厂改装 / 工程样品参与推荐。目录条目带 `productStatus`（`new` / `used` / `refurbished` / `modified` / `engineering_sample` / `unknown`）与 `productStatusReason`；默认只用 `new`，被排除的 CPU / 显卡列在 `meta.productStatusFilter.excluded`。
+- `accessoryPricing`（2.2.2，可选）：`{ fanUnitCents?, includedFans? }`。用户确认的机箱风扇单价（分）与锁定机箱的预装风扇数；用于重新计算必需附件与完整总价。
+- 返回（2.2.2）：`totalCents` 为完整可安装总价（八件套 + 必需附件）；`coreTotalCents` 为八件套；`costBreakdown` 含 `requiredAccessoriesCents`、`optionalAccessoriesCents`、`completeBuildCents`、`estimatedRangeCents`、`accessoryPriceStatus`（`known` / `estimated` / `unknown`）；`additionalCosts[]` 每项含 `quantity`、`unitPriceCents`、`priceSource`、`estimatedRangeCents`、`basis`。`assessment.budget` 可为 `met` / `met_with_estimated_accessories` / `pending_accessory_price` / `over`。兼容检查 `cpuCooling.evidence` 含证据等级 `level`（`measured` / `vendor_rating` / `engineering` / `stock` / `none`）、`coveredWatts`、`powerLimitOptionW`；`memorySpeed.evidence.factors` 分别给出 CPU / 主板 / JEDEC / 稳定性依据。
 - 方案的 `tradeoffs`（2.2.1）：与上一档相比上升 / 下降的显存、显卡指标、CPU 指标、内存与硬盘容量。
 - `locked`：硬约束，键为标准槽位；`GPU: { igpu: true }` 表示锁定使用核显。
 

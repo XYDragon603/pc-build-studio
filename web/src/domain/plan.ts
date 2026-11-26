@@ -51,8 +51,17 @@ export function planToBuild(plan: PlanResult, budgetCents: number, scenarios: st
   }
   if (plan.igpu) b.slots.gpu = { locked: false, part: placeholder(INTEGRATED_GPU_NAME, '不配独立显卡') };
   if (plan.stockCooler) b.slots.cooler = { locked: false, part: placeholder(STOCK_COOLER_NAME, '盒装自带，无需另买') };
-  for (const cost of plan.additionalCosts ?? []) b.custom.push({ id: cost.id.startsWith('custom-') ? cost.id : `custom-${cost.id}`, name: cost.name, spec: '机箱配置记录中的额外采购费用', priceCents: cost.priceCents });
+  for (const cost of plan.additionalCosts ?? []) b.custom.push({ id: cost.id.startsWith('custom-') ? cost.id : `custom-${cost.id}`, name: cost.name, spec: additionalCostSpec(cost), priceCents: cost.priceCents });
   return b;
+}
+
+/** 必需附件说明（V2.2.2 与后端完整总价同一模型）：数量、单价来源；估算价注明区间 */
+function additionalCostSpec(cost: NonNullable<PlanResult['additionalCosts']>[number]): string {
+  if (!cost.quantity) return '机箱配置记录中的额外采购费用';
+  const yuan = (c: number) => `¥${Math.round(c / 100)}`;
+  const source = cost.priceSource === 'estimate' ? `估算单价 ${yuan(cost.unitPriceCents ?? 0)}（区间 ${yuan(cost.estimatedRangeCents?.[0] ?? 0)}–${yuan(cost.estimatedRangeCents?.[1] ?? 0)}，非报价）`
+    : cost.priceSource === 'user' ? `用户确认单价 ${yuan(cost.unitPriceCents ?? 0)}` : '机箱记录的另购费用';
+  return `必需附件 ×${cost.quantity}，${source}${cost.basis ? `；${cost.basis}` : ''}`;
 }
 
 /**

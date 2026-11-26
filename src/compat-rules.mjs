@@ -11,7 +11,8 @@
 // 规则只用目录里写明的数据；认不出的组合返回 UNKNOWN，不按价格或型号名猜。
 
 import { parseGpuPower } from './specs-enrich.mjs';
-import { boardCaseStatus, boardFormat, supportedBoardFormats, coolerThermalCheck, caseThermalCheck, pcieLink, gpuPowerWatts, memorySpeedCheck, psuFitCheck } from './hardware-specs.mjs';
+import { requiredCaseFans } from './accessories.mjs';
+import { boardCaseStatus, boardFormat, supportedBoardFormats, coolerThermalCheck, caseThermalCheck, pcieLink, gpuPowerWatts, memorySpeedCheck, psuFitCheck, sustainedPower } from './hardware-specs.mjs';
 
 export const PASS = 'PASS';
 export const FAIL = 'FAIL';
@@ -80,12 +81,13 @@ function chipsetSeries(chipset) {
  * - LGA1700：13、14 代装 600 系主板需更新 BIOS
  * - LGA1851：Ultra 200S Plus 需较新 BIOS
  */
-export function biosSupport(cpuName, boardChipset) {
+export function biosSupport(cpuName, boardChipset, boardSpecs = {}) {
   const gen = cpuGeneration(cpuName);
   const cs = chipsetSeries(boardChipset);
   if (!gen || !cs) return { status: UNKNOWN, detail: '缺少 CPU 代际或主板芯片组信息，请向商家确认主板 BIOS 是否支持这颗 CPU。' };
   const amd = gen.vendor === 'AMD';
-  const update = what => ({ status: CONDITIONAL, detail: `${what}：主板需要更新到支持这颗 CPU 的 BIOS（新批次可能已出厂支持），下单前向商家确认，或选带 BIOS 免 CPU 刷新功能的主板。` });
+  const flashback = boardSpecs?.biosFlashback === true ? '（该主板支持无 CPU 刷新 BIOS / Flashback）' : '';
+  const update = what => ({ status: CONDITIONAL, detail: `${what}：主板需要更新到支持这颗 CPU 的 BIOS（新批次可能已出厂支持），下单前向商家确认，或选带 BIOS 免 CPU 刷新功能的主板${flashback}。` });
   if (amd && cs.series >= 300 && cs.series <= 500) {
     if (cs.series === 500 && ['zen1', 'zen+apu'].includes(gen.family)) return { status: FAIL, detail: `${boardChipset} 不支持这一代 Ryzen（AMD 未提供支持）。` };
     if (cs.series === 500 && gen.family === 'zen3') return update(`${boardChipset} 早期批次`);
@@ -112,6 +114,29 @@ export function biosSupport(cpuName, boardChipset) {
 /** 16pin 显卡用转接线需要几个 8pin：≤300W 2 个，≤450W 3 个，更高 4 个（显卡附带转接线的常见规格） */
 const adapterPins = watts => (watts > 450 ? 4 : watts > 300 ? 3 : 2);
 
+/**
+ * 电源显卡供电接口的规范化视图（2.2.2）。
+ * native16：true 有原生 12VHPWR / 12V-2x6；false 明确没有；null 未知（数据缺失时既不默认有，也不默认没有）。
+ * pcie8：6+2pin / 8pin 插头数；independentCables：独立 PCIe 线材数（与插头数分开，一根线可能带两个插头）。
+ */
+export function psuConnectors(psu = {}) {
+  const explicitNo = psu.native12v2x6 === false && psu.native12vhpwr !== true || psu.native12vhpwr === false && psu.native12v2x6 !== true;
+  const yes = psu.native12v2x6 === true || psu.native12vhpwr === true || psu.pin16Count > 0 || psu.native16Pin === true;
+  const no = !yes && (explicitNo || psu.pin16Count === 0 || psu.native16Pin === false);
+  return {
+    native16: yes ? true : no ? false : null,
+    native16Type: psu.native12v2x6 === true ? '12V-2x6' : psu.native12vhpwr === true ? '12VHPWR' : yes ? '16pin' : null,
+    native16Count: psu.pin16Count ?? (yes ? 1 : no ? 0 : null),
+    native16Watts: psu.connectorPowerRating ?? psu.native16PinCableWatts ?? null,
+    pcie8: psu.pcie8pinConnectors ?? psu.pcie8Count ?? null,
+    independentCables: psu.independentPcieCables ?? null,
+    cableSource: psu.cableSource ?? null,
+    revision: psu.hardwareRevision ?? null,
+  };
+}
+
+const CABLE_RULE = '只使用该电源原厂配套的模组线，禁止混用其他电源（含同品牌不同型号）的模组线。';
+
 /** 显卡供电接口 × 电源接口 */
 export function gpuPowerCheck(gpu, psu) {
   // 旧方案只存了接口文字（gpuPowerConnector: "16PIN" / 目录 powerConnectors），也能解析
@@ -119,28 +144,108 @@ export function gpuPowerCheck(gpu, psu) {
   if (!need) return { status: UNKNOWN, detail: '显卡缺少供电接口数据，请核对显卡需要几个 8pin / 16pin，以及电源是否够用。' };
   if (!need.none && !need.pin6 && !need.pin8 && !need.pin16) return { status: UNKNOWN, detail: '显卡供电接口记录不完整。' };
   if (need.none) return { status: NOT_APPLICABLE, detail: '显卡不需要外接供电。' };
-  const has8 = psu?.pcie8Count;
-  const has16 = psu?.pin16Count;
-  const native16 = has16 > 0 || psu?.native16Pin === true;
+  const c = psuConnectors(psu ?? {});
+  const has8 = c.pcie8;
+  const watts = gpuPowerWatts(gpu);
+  const highPower = (watts ?? 600) >= 450;
   if (need.pin16) {
-    const watts = gpuPowerWatts(gpu);
-    if (native16 && watts >= 500 && psu.native16PinCableWatts == null) return { status: UNKNOWN,
-      detail: `显卡整卡规格 ${watts}W。已知电源有原生 16pin，仍须核对指定原配线材的额定供电能力。` };
-    if (native16 && watts >= 500 && psu.native16PinCableWatts < watts) return { status: FAIL,
-      detail: `已记录的原配 16pin 线材额定 ${psu.native16PinCableWatts}W，低于此显卡整卡规格 ${watts}W。` };
-    if (native16) return { status: PASS, detail: `显卡 16pin 供电，电源带原生 16pin（12VHPWR / 12V-2x6）线${psu?.atxVersion?.startsWith('3') ? `，ATX ${psu.atxVersion}` : ''}。` };
     const pins = adapterPins(watts ?? 600);
-    if (has8 == null) return { status: UNKNOWN, detail: '显卡 16pin 供电，电源没有标注原生 16pin，也没有标注显卡 8pin 接口数量，无法确认能否用转接线。' };
-    if (has8 >= pins) return { status: CONDITIONAL, detail: `显卡 16pin 供电，电源没有原生 16pin：用显卡附带的转接线（需 ${pins} 个 8pin，电源有 ${has8} 个）。转接线要插紧、不要过度弯折；更稳妥是换带原生 16pin 的 ATX 3.x 电源。` };
-    return { status: FAIL, detail: `显卡 16pin 供电${watts ? `（约 ${watts}W）` : ''}，转接需要 ${pins} 个 8pin，电源只有 ${has8} 个，也没有原生 16pin。` };
+    if (c.native16 === true) {
+      if (c.native16Watts != null && watts != null && c.native16Watts < watts) return { status: FAIL, detail: `电源原生 ${c.native16Type} 线额定 ${c.native16Watts}W，低于显卡整卡规格 ${watts}W。` };
+      if (c.native16Watts == null && highPower) return { status: UNKNOWN, detail: `显卡整卡规格 ${watts ?? '未知'}W。电源有原生 16pin，但没有该线材的额定功率（450W / 600W）记录，须核对原厂线标注。${CABLE_RULE}` };
+      return { status: PASS, detail: `显卡 16pin 供电，电源带原生 ${c.native16Type}${c.native16Watts ? `（线材额定 ${c.native16Watts}W）` : ''}${psu?.atxVersion?.startsWith('3') ? `，ATX ${psu.atxVersion}` : ''}。插头须插到底。${CABLE_RULE}` };
+    }
+    if (has8 == null) return { status: UNKNOWN, detail: `显卡 16pin 供电。电源${c.native16 === false ? '明确没有原生 16pin' : '是否有原生 16pin 未知'}，也没有显卡 8pin 接口数量，无法确认供电方案。` };
+    if (has8 < pins) {
+      // 原生接口未知时不能判死：可能有未记录的原生 16pin
+      return c.native16 === false
+        ? { status: FAIL, detail: `显卡 16pin 供电${watts ? `（约 ${watts}W）` : ''}，转接需要 ${pins} 个 8pin，电源只有 ${has8} 个，也没有原生 16pin。` }
+        : { status: UNKNOWN, detail: `显卡 16pin 供电，转接需要 ${pins} 个 8pin，电源记录只有 ${has8} 个；电源是否有原生 16pin 未知，须按具体型号 / Rev 版本核实。` };
+    }
+    const nativeText = c.native16 === false ? '电源明确没有原生 16pin' : '电源是否有原生 16pin 未知（目录只记录了 8pin 插头数，不能据此认定没有，也不能认定有）';
+    const cables = c.independentCables;
+    if (cables != null && cables >= pins) return { status: CONDITIONAL, detail: `显卡 16pin 供电，${nativeText}：用显卡附带的转接线，需 ${pins} 根独立 8pin 线（电源有 ${cables} 根独立 PCIe 线、${has8} 个插头）。${highPower ? '高功耗显卡更稳妥是用带原生 12V-2x6 原厂线的电源。' : ''}${CABLE_RULE}` };
+    if (cables != null && cables < pins) return { status: highPower ? FAIL : CONDITIONAL, detail: `显卡 16pin 转接需要 ${pins} 根独立 8pin 线，电源只有 ${cables} 根独立 PCIe 线（${has8} 个插头含一线双头）。${highPower ? '高功耗显卡不能用一线双头凑数。' : '一线双头需确认厂商允许。'}` };
+    return { status: highPower ? UNKNOWN : CONDITIONAL, detail: `显卡 16pin 供电${watts ? `（约 ${watts}W）` : ''}，${nativeText}。转接需 ${pins} 根独立 8pin 线；电源有 ${has8} 个 8pin 插头，但独立线材数量未知（一根线可能带两个插头），${highPower ? '高功耗显卡须核实后才能使用。' : '需核实。'}${CABLE_RULE}` };
   }
   const needPins = (need.pin8 ?? 0) + (need.pin6 ?? 0);
   if (has8 == null) return { status: UNKNOWN, detail: `显卡需要 ${describePins(need)}，电源没有标注显卡供电接口数量。` };
   // 电源的 8pin 多为 6+2pin，可当 6pin 用；6pin 只能接 6pin
   const usable = has8 + (need.pin6 ? Math.min(psu.pcie6Count ?? 0, need.pin6) : 0);
-  if (usable >= needPins && has8 >= (need.pin8 ?? 0)) return { status: PASS, detail: `显卡需要 ${describePins(need)}，电源有 ${has8} 个 8pin${psu.pcie6Count ? `、${psu.pcie6Count} 个 6pin` : ''}。` };
-  return { status: FAIL, detail: `显卡需要 ${describePins(need)}，电源只有 ${has8} 个 8pin${psu.pcie6Count ? `、${psu.pcie6Count} 个 6pin` : ''}。` };
+  if (!(usable >= needPins && has8 >= (need.pin8 ?? 0))) return { status: FAIL, detail: `显卡需要 ${describePins(need)}，电源只有 ${has8} 个 8pin${psu.pcie6Count ? `、${psu.pcie6Count} 个 6pin` : ''}。` };
+  const cables = c.independentCables;
+  if (needPins >= 3 && cables != null && cables < needPins) return { status: CONDITIONAL, detail: `显卡需要 ${describePins(need)}，电源 ${has8} 个插头但只有 ${cables} 根独立 PCIe 线，需一线双头供电，须确认厂商允许。` };
+  if (needPins >= 3 && cables == null) return { status: CONDITIONAL, detail: `显卡需要 ${describePins(need)}，电源有 ${has8} 个 8pin 插头；独立线材数量未知，建议每个接口各用一根独立线。${CABLE_RULE}` };
+  return { status: PASS, detail: `显卡需要 ${describePins(need)}，电源有 ${has8} 个 8pin${psu.pcie6Count ? `、${psu.pcie6Count} 个 6pin` : ''}。` };
 }
+/**
+ * 16pin（12VHPWR / 12V-2x6）供电线空间（2.2.2）。
+ * 需求：显卡 / 线材厂商给出的要求（requiredCableClearanceMm，含显卡高度）优先；否则用 35mm 工程参考值
+ * （常见厂商安装建议，PCI-SIG 没有适用于全部线材的统一数值）。插头位置：powerConnectorPosition 为 'end' 时不占侧板空间。
+ * 空间：只认机箱的供电线空间 gpuCableClearanceMm 或显卡高度限制 maxGpuHeightMm（同一基准）。
+ * CPU 散热器限高测量基准不同，只作参考，不能确认安全空间；高功耗（≥300W）缺少依据时为关键待核实。
+ */
+export const CABLE_BEND_REFERENCE_MM = 35;
+const mm = v => Math.round(v * 10) / 10;
+export function gpuCableClearance(gpu = {}, pc = {}) {
+  const watts = gpuPowerWatts(gpu) ?? 0;
+  const critical = watts >= 300;
+  if (gpu.powerConnectorPosition === 'end') return { status: CONDITIONAL, critical: false, detail: '16pin 插头在显卡尾部，不占侧板方向空间；需核对显卡长度方向与前置风扇 / 冷排的走线余量。' };
+  const vendorNeed = gpu.requiredCableClearanceMm;
+  const need = vendorNeed ?? (gpu.heightMm != null ? mm(gpu.heightMm + CABLE_BEND_REFERENCE_MM) : null);
+  const needText = vendorNeed ? `厂商要求 ${vendorNeed}mm` : `显卡高度 ${gpu.heightMm ?? '?'}mm + ${CABLE_BEND_REFERENCE_MM}mm 工程参考直线段（非统一官方要求）= ${need ?? '?'}mm`;
+  const room = pc.gpuCableClearanceMm ?? pc.maxGpuHeightMm ?? null;
+  if (need != null && room != null) {
+    const margin = mm(room - need);
+    if (margin < 0) return { status: FAIL, critical: true, detail: `16pin 供电线需 ${needText}，机箱${pc.gpuCableClearanceMm != null ? '供电线空间' : '显卡高度限制'} ${room}mm，空间不足，插头会被侧板压弯。` };
+    if (margin < 10) return { status: UNKNOWN, critical, detail: `16pin 供电线需 ${needText}，机箱空间 ${room}mm，余量仅 ${margin}mm；理论余量过小，须实测或换用 90° 原厂线。` };
+    return { status: vendorNeed ? PASS : CONDITIONAL, critical: false, detail: `16pin 供电线需 ${needText}，机箱空间 ${room}mm，余量 ${margin}mm。插头须插到底，直线段内不要弯折。` };
+  }
+  const proxy = pc.maxCoolerHeightMm != null && need != null ? mm(pc.maxCoolerHeightMm - need) : null;
+  return { status: UNKNOWN, critical,
+    detail: `16pin 供电线需 ${needText}。机箱没有公布显卡高度限制或供电线空间${proxy != null ? `；CPU 散热器限高 ${pc.maxCoolerHeightMm}mm 与显卡高度测量基准不同，不能作为供电线空间依据（按其粗算余量 ${proxy}mm，仅供参考）` : ''}。${critical ? `显卡约 ${watts}W，属高功耗 16pin，须实测侧板空间或确认机箱 / 线材厂商数据后再使用。` : '需核实侧板空间。'}`,
+    evidence: { type: 'incomplete', requiredMm: need, proxyMarginMm: proxy } };
+}
+
+/**
+ * 水冷冷排安装（2.2.2）：按机箱公布的冷排位置逐个校核。
+ *   顶部：冷排厚度 + 25mm 风扇与内存高度 / 主板散热片共用空间（机箱有 topRadiatorClearanceMm 时比较，否则需核对）
+ *   前置：冷排厚度 + 25mm 风扇占用显卡限长，重新计算显卡可用长度
+ * 冷排厚度未知时按不确定处理，不套用典型值。
+ */
+export function radiatorLayoutCheck(cooler = {}, pc = {}, gpu = null, ram = null) {
+  const size = cooler.radiatorSizeMm;
+  const positions = (pc.radiatorPositions ?? []).filter(p => p.sizesMm?.includes(size));
+  if (!pc.radiatorPositions?.length) return { status: UNKNOWN, critical: true, detail: `机箱缺少 ${size}mm 冷排的具体安装位置数据，不能确认与显卡、内存、电源的空间关系。` };
+  if (!positions.length) return { status: FAIL, critical: true, detail: `机箱公布的冷排位置（${pc.radiatorPositions.map(p => `${p.position} ${p.sizesMm.join('/')}`).join('，')}）都不支持 ${size}mm。` };
+  const thick = cooler.radiatorThicknessMm;
+  const stack = thick != null ? thick + 25 : null;
+  const notes = [];
+  const top = positions.find(p => p.position === 'top');
+  if (top) {
+    if (pc.topRadiatorClearanceMm != null && stack != null) {
+      const ramH = ram?.heightMm ?? null;
+      if (stack > pc.topRadiatorClearanceMm) notes.push({ ok: false, text: `顶部冷排 + 风扇厚 ${stack}mm，超过顶部空间 ${pc.topRadiatorClearanceMm}mm` });
+      else return { status: CONDITIONAL, critical: false, detail: `${size}mm 冷排装顶部：冷排 ${thick}mm + 风扇 25mm = ${stack}mm，顶部空间 ${pc.topRadiatorClearanceMm}mm${ramH ? `；内存高 ${ramH}mm 需核对与冷排错位` : '；需核对内存高度与主板供电散热片'}。` };
+    } else {
+      return { status: CONDITIONAL, critical: false, detail: `${size}mm 冷排装顶部（机箱支持）。${stack != null ? `冷排 ${thick}mm + 风扇 25mm = ${stack}mm，` : '冷排厚度未知，'}机箱未公布顶部冷排与内存 / 主板散热片间距，装机前须核对高马甲内存与冷排是否冲突。` };
+    }
+  }
+  const front = positions.find(p => p.position === 'front');
+  if (front && gpu) {
+    if (stack == null) notes.push({ ok: null, text: '前置冷排厚度未知，无法重新计算显卡可用长度' });
+    else if (gpu.lengthMm != null && pc.maxGpuLengthMm != null) {
+      const usable = pc.maxGpuLengthMm - stack;
+      if (gpu.lengthMm <= usable) return { status: CONDITIONAL, critical: false, detail: `${size}mm 冷排装前置：显卡可用长度 ${pc.maxGpuLengthMm} − ${stack} = ${usable}mm，显卡 ${gpu.lengthMm}mm（余量 ${usable - gpu.lengthMm}mm）；机箱限长是否已扣除前置风扇需按说明书核对。` };
+      notes.push({ ok: false, text: `前置冷排后显卡可用长度 ${usable}mm，小于显卡 ${gpu.lengthMm}mm` });
+    }
+  } else if (front) return { status: CONDITIONAL, critical: false, detail: `${size}mm 冷排装前置（核显方案无显卡长度冲突）。` };
+  const other = positions.find(p => !['top', 'front'].includes(p.position));
+  if (other) return { status: CONDITIONAL, critical: false, detail: `${size}mm 冷排装${other.position}位置；需核对与其他配件的空间。${notes.map(n => n.text).join('；')}` };
+  if (notes.some(n => n.ok === false) && !notes.some(n => n.ok === null)) return { status: FAIL, critical: true, detail: notes.map(n => n.text).join('；') };
+  return { status: UNKNOWN, critical: true, detail: `${notes.map(n => n.text).join('；')}，不能确认冷排安装空间。` };
+}
+
 const describePins = p => [p.pin8 && `${p.pin8} 个 8pin`, p.pin6 && `${p.pin6} 个 6pin`].filter(Boolean).join(' + ');
 
 /** 整机功耗估算：CPU 峰值 + 显卡整卡功耗 + 75W（主板、内存、硬盘、风扇） */
@@ -197,7 +302,7 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
   }
   // BIOS
   if (cpu && board) {
-    const r = biosSupport(parts.CPU?.name, board.chipset);
+    const r = biosSupport(parts.CPU?.name, board.chipset, board);
     add('bios', 'BIOS 支持', r.status, r.detail, r.status === UNKNOWN);
   }
   // 内存代际、条数、容量、频率
@@ -213,7 +318,7 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
       add('memoryCapacity', '内存容量', ram.capacityGB <= board.maxMemoryGB ? PASS : FAIL, `内存 ${ram.capacityGB}GB，主板最大 ${board.maxMemoryGB}GB。`);
     }
     const speed = memorySpeedCheck(cpu, board, ram, parts.RAM?.mpn ?? ram.memorySku);
-    if (speed) add('memorySpeed', '内存频率', speed.status, speed.detail);
+    if (speed) add('memorySpeed', '内存频率', speed.status, speed.detail, false, speed.factors ? { type: speed.status === UNKNOWN ? 'incomplete' : 'specification', factors: speed.factors, detail: speed.detail } : undefined);
   }
   // 核显方案：CPU 核显 + 主板视频接口
   if (igpu) {
@@ -262,9 +367,11 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
     }
   }
   if (cpu && (cooler || stockCooler)) {
-    const r = coolerThermalCheck(cpu, cooler, pc, board ?? {}, workload);
-    add('cpuCooling', 'CPU 持续散热', stockCooler ? (highPower && cpu.maxPowerWatts >= 180 ? UNKNOWN : CONDITIONAL) : r.status,
-      stockCooler ? '使用盒装原装散热器：必须核对包装实际含风扇，并采用厂家默认功耗限制；持续满载温度及噪音尚未确认。' : r.detail, (cpu.maxPowerWatts ?? 0) >= 180);
+    // 2.2.2：原装散热与第三方散热共用证据模型；不按塔高推断能力，覆盖不了持续负载时为关键待核实并给出降功耗条件
+    const r = coolerThermalCheck(cpu, cooler, pc, board ?? {}, workload, { stock: stockCooler });
+    add('cpuCooling', 'CPU 持续散热', r.status,
+      stockCooler && r.status !== UNKNOWN ? `使用盒装原装散热器：必须核对所购 SKU 包装实际含散热器，并采用厂家默认功耗限制。${r.detail}` : r.detail, r.critical,
+      r.evidence ? { ...r.evidence, detail: r.detail } : undefined);
   }
   if (cpu && pc) {
     const r = caseThermalCheck(cpu, gpu, pc, board ?? {}, workload);
@@ -273,8 +380,15 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
   }
   // 机箱：显卡长度、风冷高度 / 冷排、主板板型
   if (pc) {
-    if (gpu) add('gpuLength', '显卡长度', !gpu.lengthMm || !pc.maxGpuLengthMm ? UNKNOWN : gpu.lengthMm <= pc.maxGpuLengthMm ? PASS : FAIL,
-      !gpu.lengthMm || !pc.maxGpuLengthMm ? '显卡长度或机箱显卡限长缺少数据。' : `显卡 ${gpu.lengthMm}mm，机箱限长 ${pc.maxGpuLengthMm}mm${gpu.lengthMm <= pc.maxGpuLengthMm ? `，余量 ${pc.maxGpuLengthMm - gpu.lengthMm}mm` : ''}。`, true);
+    if (gpu) {
+      // 2.2.2：整机需要前置进风风扇时，机箱限长若未说明已扣除前置风扇，需留出 25mm 风扇厚度
+      const frontFans = cpu && requiredCaseFans(sustainedPower(cpu, board ?? {}, workload) ?? 0, gpuPowerWatts(gpu) ?? 0).intake > 0;
+      const fanRoom = frontFans && pc.gpuLengthIncludesFrontFans !== true ? 25 : 0;
+      if (!gpu.lengthMm || !pc.maxGpuLengthMm) add('gpuLength', '显卡长度', UNKNOWN, '显卡长度或机箱显卡限长缺少数据。', true);
+      else if (gpu.lengthMm > pc.maxGpuLengthMm) add('gpuLength', '显卡长度', FAIL, `显卡 ${gpu.lengthMm}mm，机箱限长 ${pc.maxGpuLengthMm}mm。`, true);
+      else if (gpu.lengthMm + fanRoom > pc.maxGpuLengthMm) add('gpuLength', '显卡长度', UNKNOWN, `显卡 ${gpu.lengthMm}mm，机箱限长 ${pc.maxGpuLengthMm}mm，余量 ${mm(pc.maxGpuLengthMm - gpu.lengthMm)}mm；整机需要前置进风风扇（约 25mm 厚），机箱未说明限长是否已扣除前置风扇，装风扇后可能顶到显卡。`, true);
+      else add('gpuLength', '显卡长度', PASS, `显卡 ${gpu.lengthMm}mm，机箱限长 ${pc.maxGpuLengthMm}mm，余量 ${mm(pc.maxGpuLengthMm - gpu.lengthMm)}mm${fanRoom ? '（已留出前置风扇 25mm）' : ''}。`, true);
+    }
     if (cooler?.radiatorSizeMm) add('radiator', '水冷排', !pc.maxRadiatorMm ? UNKNOWN : cooler.radiatorSizeMm <= pc.maxRadiatorMm ? PASS : FAIL,
       !pc.maxRadiatorMm ? '机箱缺少冷排支持数据。' : `冷排 ${cooler.radiatorSizeMm}mm，机箱最大 ${pc.maxRadiatorMm}mm。`);
     else if (cooler) add('coolerHeight', '风冷高度', !cooler.heightMm || !pc.maxCoolerHeightMm ? UNKNOWN : cooler.heightMm <= pc.maxCoolerHeightMm ? PASS : FAIL,
@@ -292,9 +406,14 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
     const slotsOf = g => (g.slotWidth != null ? Math.ceil(g.slotWidth) : g.thicknessMm ? Math.ceil(g.thicknessMm / 20.32) : null);
     if (gpu) {
       // 高度：机箱散热器限高与显卡高度都从主板平面量到侧板方向，散热器还要扣掉 CPU 插座与顶盖高度，作为替代偏保守
-      if (pc.maxGpuHeightMm == null && gpu.heightMm != null && pc.maxCoolerHeightMm != null && gpu.heightMm <= pc.maxCoolerHeightMm) {
-        add('gpuHeight', '显卡高度', CONDITIONAL, `显卡高 ${gpu.heightMm}mm。机箱未公布显卡高度限制，按散热器限高 ${pc.maxCoolerHeightMm}mm 保守推断可装入（同样从主板平面量到侧板）；需核对侧板与供电线空间。`, highPower,
-          { type: 'engineering-judgment', detail: '散热器限高替代显卡高度限制' });
+      // 2.2.2：散热器限高与显卡高度的测量基准不一定相同（前者从主板平面算，后者从 PCIe 插槽 / 挡板算），
+      // 只有余量足够大（≥15mm）时才作为“需核对”的推断；余量小于 15mm 时不能据此判断可装入。
+      const PROXY_MARGIN = 15;
+      if (pc.maxGpuHeightMm == null && gpu.heightMm != null && pc.maxCoolerHeightMm != null && gpu.heightMm + PROXY_MARGIN <= pc.maxCoolerHeightMm) {
+        add('gpuHeight', '显卡高度', CONDITIONAL, `显卡高 ${gpu.heightMm}mm。机箱未公布显卡高度限制；参考散热器限高 ${pc.maxCoolerHeightMm}mm（测量基准可能不同，余量 ${pc.maxCoolerHeightMm - gpu.heightMm}mm ≥ ${PROXY_MARGIN}mm 才采用此推断），需实测侧板空间。`, highPower,
+          { type: 'engineering-judgment', detail: '散热器限高作为显卡高度参考（非同一测量基准）' });
+      } else if (pc.maxGpuHeightMm == null && gpu.heightMm != null && pc.maxCoolerHeightMm != null && gpu.heightMm <= pc.maxCoolerHeightMm) {
+        add('gpuHeight', '显卡高度', UNKNOWN, `显卡高 ${gpu.heightMm}mm，散热器限高 ${pc.maxCoolerHeightMm}mm，余量仅 ${pc.maxCoolerHeightMm - gpu.heightMm}mm；两者测量基准不同，机箱未公布显卡高度限制，不能确认可装入。`, highPower);
       } else compare('gpuHeight', '显卡高度', gpu.heightMm, pc.maxGpuHeightMm, highPower);
       // 厚度：机箱没有厚度限制时由扩展槽位约束（每槽 20.32mm）；槽位冲突由 gpuSlots 判 FAIL
       const slots = slotsOf(gpu);
@@ -304,13 +423,8 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
       } else compare('gpuThickness', '显卡厚度', gpu.thicknessMm, pc.maxGpuThicknessMm, highPower);
       compare('gpuSlots', '显卡扩展槽', slots, pc.expansionSlots, highPower);
       if (gpu.powerPins?.pin16 || /16PIN|12V/i.test(gpu.gpuPowerConnector ?? '')) {
-        // 16pin（12V-2x6 / 12VHPWR）：插头后需约 35mm 直线段再弯折（NVIDIA / PCI-SIG 安装建议）
-        const need = gpu.requiredCableClearanceMm ?? (gpu.heightMm != null ? gpu.heightMm + 35 : null);
-        const room = pc.gpuCableClearanceMm ?? pc.maxCoolerHeightMm ?? null;
-        if (pc.gpuCableClearanceMm == null && need != null && room != null && need <= room) {
-          add('gpuCable', '显卡供电线空间', CONDITIONAL, `16pin 插头在显卡顶部，需显卡高度 + 约 35mm 直线段（共约 ${need}mm）；按散热器限高 ${room}mm 推断侧板空间够用。插头须插到底、35mm 内不要弯折。`, true,
-            { type: 'engineering-judgment', detail: '散热器限高替代供电线空间' });
-        } else compare('gpuCable', '显卡供电线空间', need, pc.gpuCableClearanceMm);
+        const r = gpuCableClearance(gpu, pc);
+        add('gpuCable', '显卡供电线空间', r.status, r.detail, r.critical, r.evidence);
       }
     }
     if (psu) {
@@ -324,9 +438,8 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
       add('psuFormat', '电源规格', fit.status, fit.detail, true);
     }
     if (cooler?.radiatorSizeMm) {
-      const fits = pc.radiatorPositions?.some(p => p.sizesMm?.includes(cooler.radiatorSizeMm));
-      add('radiatorLayout', '冷排安装与空间共享', !pc.radiatorPositions?.length ? UNKNOWN : !fits ? FAIL : pc.radiatorConflicts?.length ? CONDITIONAL : UNKNOWN,
-        !pc.radiatorPositions?.length ? '缺少冷排具体安装位置及与显卡、内存、电源的空间共享数据。' : `需核对冷排位置及空间冲突：${pc.radiatorConflicts?.join('；') ?? '没有碰撞实测数据'}`, true);
+      const r = radiatorLayoutCheck(cooler, pc, gpu, ram);
+      add('radiatorLayout', '冷排安装与空间共享', r.status, r.detail, r.critical);
     }
   }
   // M.2 固态
@@ -339,14 +452,22 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
     add('pcie', '显卡实际 PCIe 链路', r.status, r.detail);
   }
   if (ssd && board && /M\.2|NVME/i.test(ssd.interface ?? '')) {
-    const r = pcieLink(cpu ?? {}, board, ssd, { storage: true });
+    const r = pcieLink(cpu ?? {}, board, ssd, { storage: true, cpuName: parts.CPU?.name ?? '' });
     add('ssdPcie', 'SSD 实际 PCIe 链路', r.status, r.detail);
   }
   // Intel Arc：ReBAR
   if (gpu?.needsResizableBar && board) {
-    const old = chipsetSeries(board.chipset);
-    add('rebar', 'Resizable BAR', old && old.letter !== 'Z' && old.series === 300 && up(board.socket) === 'AM4' ? UNKNOWN : CONDITIONAL,
-      'Intel Arc 显卡需要在 BIOS 里开启 Resizable BAR 和 Above 4G Decoding、系统用 UEFI 模式安装，否则性能大幅下降。');
+    if (board.rebarSupport === false) {
+      add('rebar', 'Resizable BAR', FAIL, '主板明确不支持 Resizable BAR / Above 4G Decoding，Intel Arc 显卡在此平台上性能严重受限。');
+    } else if (board.rebarSupport === true) {
+      add('rebar', 'Resizable BAR', CONDITIONAL, '主板支持 Resizable BAR：需在 BIOS 中开启 ReBAR 与 Above 4G Decoding、系统用 UEFI 模式安装，否则 Intel Arc 性能大幅下降。');
+    } else if (board.rebarSupport === 'bios-update') {
+      add('rebar', 'Resizable BAR', CONDITIONAL, '主板支持通过更新 BIOS 开启 Resizable BAR：需确认 BIOS 已更新并开启 ReBAR 与 Above 4G Decoding（UEFI 模式），否则 Intel Arc 性能大幅下降。');
+    } else {
+      const old = chipsetSeries(board.chipset);
+      add('rebar', 'Resizable BAR', old && old.letter !== 'Z' && old.series === 300 && up(board.socket) === 'AM4' ? UNKNOWN : CONDITIONAL,
+        'Intel Arc 显卡需要在 BIOS 里开启 Resizable BAR 和 Above 4G Decoding、系统用 UEFI 模式安装，否则性能大幅下降。');
+    }
   }
   // 主板供电：高功耗 CPU 配入门芯片组 / 供电相数少
   if (cpu?.maxPowerWatts >= 200 && board) {

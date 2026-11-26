@@ -69,7 +69,9 @@ test('同一快照、同一参数结果可重复', () => {
 test('总价等于配件单价之和；推荐结果没有确认不兼容的组合', () => {
   for (const sc of ['2k', '4k', '1080p', 'ai', 'creator', 'office']) for (const yuan of [4000, 8000, 15000, 30000]) {
     for (const p of plans(yuan, [sc]).plans.filter(p => !p.infeasible)) {
-      assert.equal(p.totalCents, p.picks.reduce((s, x) => s + x.item.estimatedPriceCents, 0), `${sc} ${yuan} ${p.id}`);
+      // 2.2.2：完整总价 = 配件单价之和 + 必需附件（机箱风扇等）
+      assert.equal(p.totalCents, p.picks.reduce((s, x) => s + x.item.estimatedPriceCents, 0) + p.additionalCosts.reduce((s, x) => s + x.priceCents, 0), `${sc} ${yuan} ${p.id}`);
+      assert.equal(p.costBreakdown.completeBuildCents, p.totalCents);
       assert.ok(!p.compatibility.checks.some(c => c.status === 'FAIL'), `${sc} ${yuan} ${p.id}`);
     }
   }

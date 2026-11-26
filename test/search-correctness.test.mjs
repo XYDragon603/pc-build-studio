@@ -5,7 +5,10 @@ import assert from 'node:assert/strict';
 import { optimizePlans, tradeoffNotes } from '../src/optimizer.mjs';
 import { evaluateBuild, FAIL, powerEstimate } from '../src/compat-rules.mjs';
 import { corePerformance } from '../src/recommendation-strategy.mjs';
-import { coolerSizeClass, coolingClassFor, stockCooler, sustainedPower } from '../src/hardware-specs.mjs';
+import { gpuPowerWatts, stockCooler, sustainedPower } from '../src/hardware-specs.mjs';
+import { capacityCovers, coolingCapacity } from '../src/thermal-evidence.mjs';
+import { accessoryCost } from '../src/accessories.mjs';
+const test30 = (watts, socket) => [{ kind: 'measured', powerWatts: watts, cpu: '测试 CPU', cpuSocket: socket, ambientC: 25, maxTempC: 85, tempLimitC: 105, durationMinutes: 30, sourceUrl: 'https://example.com/cooler-test' }];
 import { MIN_REQUIREMENTS, SCORING_PROFILES } from '../src/scoring-profiles.mjs';
 import { applyPriceMode, normalizeRecord } from '../src/prices.mjs';
 
@@ -50,7 +53,9 @@ function makeCatalog() {
     ram(500, 'DDR4', 32, 3200), ram(900, 'DDR4', 64, 3200), ram(700, 'DDR5', 32, 6000), ram(1300, 'DDR5', 64, 6000),
     ssd(200, 512), ssd(400, 1000), ssd(700, 2000), ssd(1500, 4000),
     psu(350, 550, 0, 2), psu(600, 750, 1, 3), psu(1100, 1000, 1, 3), psu(1500, 1300, 1, 3),
-    cooler(60, '单塔 125mm', { heightMm: 125 }), cooler(120, '单塔 155mm', { heightMm: 155 }), cooler(250, '双塔 160mm', { heightMm: 160 }), cooler(500, '360 水冷', { radiatorSizeMm: 360, heightMm: 55 }),
+    // 2.2.2：散热能力只来自证据（热管数量 / 实测），与塔高无关：125mm 与 155mm 单塔同为 4 热管、同为 125W 工程判断
+    cooler(60, '单塔 125mm', { heightMm: 125, heatPipes: 4 }), cooler(120, '单塔 155mm', { heightMm: 155, heatPipes: 4 }),
+    cooler(250, '双塔 160mm', { heightMm: 160, heatPipes: 6, thermalTests: test30(260, 'LGA1700') }), cooler(500, '360 水冷', { radiatorSizeMm: 360, heightMm: 55, thermalTests: test30(300, 'AM5') }),
     pcCase(200, 'mATX 机箱', { supportedBoardFormats: ['MICRO ATX', 'MINI-ITX'], maxBoardFormFactor: 'MICRO ATX', maxGpuLengthMm: 330, maxCoolerHeightMm: 160, maxRadiatorMm: 240, expansionSlots: 5 }),
     pcCase(350, 'ATX 机箱', { supportedBoardFormats: ['ATX', 'MICRO ATX', 'MINI-ITX'], maxBoardFormFactor: 'ATX', maxGpuLengthMm: 400, maxCoolerHeightMm: 170, maxRadiatorMm: 360, expansionSlots: 7 }),
   ].map(i => (i.category === 'GPU' && i.performance?.gaming?.index == null ? { ...i, performance: undefined } : i));
@@ -77,10 +82,12 @@ function exhaustiveBestCore(items, { scenario, target, allowModified = false }) 
       if (base > target) continue;
       const p = powerEstimate(c.specs, g.specs, {});
       const watts = sustainedPower(c.specs, b.specs, {});
-      const coolers = [...(stockCooler(c) && watts <= 95 ? ['STOCK'] : []), ...by(items, 'COOLER').filter(x => coolerSizeClass(x.specs) >= coolingClassFor(watts))];
+      const covering = by(items, 'COOLER').filter(x => capacityCovers(coolingCapacity(x.specs, { cpu: c.specs }), watts));
+      const coolers = [...(stockCooler(c) && watts <= 95 ? ['STOCK'] : []), ...(covering.length ? covering : by(items, 'COOLER'))];
       for (const r of by(items, 'RAM').filter(r => r.specs.memoryType === b.specs.memoryType)) for (const s of by(items, 'SSD'))
         for (const u of by(items, 'PSU').filter(u => u.specs.ratedWatts >= p.selectionMinimum)) for (const k of coolers) for (const pc of by(items, 'CASE')) {
-          const total = base + price(r) + price(s) + price(u) + price(pc) + (k === 'STOCK' ? 0 : price(k));
+          const acc = accessoryCost({ cpuW: watts, gpuW: gpuPowerWatts(g.specs), pc: pc.specs, psu: u.specs }).requiredCents;
+          const total = base + price(r) + price(s) + price(u) + price(pc) + (k === 'STOCK' ? 0 : price(k)) + acc;
           if (total > target) continue;
           const parts = { CPU: c, GPU: g, MOTHERBOARD: b, RAM: r, SSD: s, PSU: u, CASE: pc, COOLER: k === 'STOCK' ? null : k };
           const checks = evaluateBuild(Object.fromEntries(Object.entries(parts).map(([key, v]) => [key, v ? { name: v.name, specs: v.specs } : null])), { stockCooler: k === 'STOCK' });
@@ -121,7 +128,7 @@ test('02 不过早固定 SSD 与散热器：预算高时选更大容量硬盘，
   // 热负载：250W 的 265K 需要 ≥ 大塔 / 水冷；88W 的 7600 盒装可用原装
   const lockedHot = run(items, 12000, { locked: { CPU: { name: 'Intel Core Ultra 7 265K', priceCents: 170000, specs: by(items, 'CPU')[3].specs } } }).plans.find(p => p.id === 'balanced');
   const hotCooler = pick(lockedHot, 'COOLER');
-  assert.ok(hotCooler && coolerSizeClass(hotCooler.specs) >= coolingClassFor(250), `265K 配 ${hotCooler?.name}`);
+  assert.ok(hotCooler && capacityCovers(coolingCapacity(hotCooler.specs, { cpu: { socket: 'LGA1851' } }), 250), `265K 配 ${hotCooler?.name}`);
   const cool = run(items, 8000, { locked: { CPU: { name: 'AMD Ryzen 5 7600', priceCents: 130000, specs: by(items, 'CPU')[1].specs } } }).plans.find(p => p.id === 'save');
   assert.equal(cool.stockCooler, true, '盒装附散热器且 88W：使用原装散热器');
 });

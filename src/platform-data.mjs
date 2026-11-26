@@ -13,29 +13,30 @@ const NVIDIA = 'https://www.nvidia.com/en-us/geforce/graphics-cards/compare/';
 const RADEON = 'https://www.amd.com/en/products/specifications/graphics.html';
 const ARC = 'https://www.intel.com/content/www/us/en/products/docs/discrete-gpus/arc/desktop/a-series/overview.html';
 
-// CPU：[名称匹配, { 内存上限（按内存类型）, CPU 给显卡的 PCIe 链路, 来源 }]。按顺序匹配第一条。
+// CPU：[名称匹配, { 内存上限（按内存类型）, CPU 给显卡的 PCIe 链路, CPU 直连 M.2 链路, 是否附原装散热, 来源 }]。按顺序匹配第一条。
 const CPU_RULES = [
   // AMD Zen+ / Zen 2 APU（PCIe 3.0、DDR4-2933）
-  [/RYZEN\s*[357]\s*2\d{3}(X|G)?\b|RYZEN\s*[35]\s*3[24]00G\b/i, { mem: { DDR4: 2933 }, pcie: { gen: 3, lanes: 16 }, src: AMD }],
+  [/RYZEN\s*[357]\s*2\d{3}(X|G)?\b|RYZEN\s*[35]\s*3[24]00G\b/i, { mem: { DDR4: 2933 }, pcie: { gen: 3, lanes: 16 }, storagePcie: { gen: 3, lanes: 4 }, src: AMD }],
   // Ryzen 4000 桌面（4100 / 4500 / 4600G / PRO 4650G）：Zen 2，PCIe 3.0；APU 显卡通道 x16（4600G 系列为 x16 Gen3）
-  [/RYZEN\s*[35]\s*(PRO\s*)?4[156]\d0G?\b/i, { mem: { DDR4: 3200 }, pcie: { gen: 3, lanes: 16 }, src: AMD }],
+  [/RYZEN\s*[35]\s*(PRO\s*)?4[156]\d0G?\b/i, { mem: { DDR4: 3200 }, pcie: { gen: 3, lanes: 16 }, storagePcie: { gen: 3, lanes: 4 }, src: AMD }],
   // Ryzen 5000 中 Cezanne 核心（5500、5600G/GT、5500GT、5700G、5700）：PCIe 3.0
-  [/RYZEN\s*[357]\s*5(500|600G|600GT|500GT|700G|700)\b(?!X)/i, { mem: { DDR4: 3200 }, pcie: { gen: 3, lanes: 16 }, src: AMD }],
+  [/RYZEN\s*[357]\s*5(500|600G|600GT|500GT|700G|700)\b(?!X)/i, { mem: { DDR4: 3200 }, pcie: { gen: 3, lanes: 16 }, storagePcie: { gen: 3, lanes: 4 }, src: AMD }],
   // 其余 Ryzen 3000 / 5000（Zen 2 / Zen 3 桌面，含 X3D、XT）：PCIe 4.0、DDR4-3200
-  [/RYZEN\s*[3579]\s*[35]\d{3}(X3D|XT|X)?\b/i, { mem: { DDR4: 3200 }, pcie: { gen: 4, lanes: 16 }, src: AMD }],
+  [/RYZEN\s*[3579]\s*[35]\d{3}(X3D|XT|X)?\b/i, { mem: { DDR4: 3200 }, pcie: { gen: 4, lanes: 16 }, storagePcie: { gen: 4, lanes: 4 }, src: AMD }],
   // Ryzen 7000 / 8000G：DDR5-5200；7000 PCIe 5.0，8000G APU PCIe 4.0
-  [/RYZEN\s*[3579]\s*8\d00G/i, { mem: { DDR5: 5200 }, pcie: { gen: 4, lanes: 8 }, src: AMD }],
-  [/RYZEN\s*[3579]\s*7\d{3}/i, { mem: { DDR5: 5200 }, pcie: { gen: 5, lanes: 16 }, src: AMD }],
+  [/RYZEN\s*[3579]\s*8\d00G/i, { mem: { DDR5: 5200 }, pcie: { gen: 4, lanes: 8 }, storagePcie: { gen: 4, lanes: 4 }, src: AMD }],
+  [/RYZEN\s*[3579]\s*7\d{3}/i, { mem: { DDR5: 5200 }, pcie: { gen: 5, lanes: 16 }, storagePcie: { gen: 5, lanes: 4 }, src: AMD }],
   // Ryzen 9000：DDR5-5600、PCIe 5.0
-  [/RYZEN\s*[3579]\s*9\d{3}|锐龙\s*9\s*9\d{3}/i, { mem: { DDR5: 5600 }, pcie: { gen: 5, lanes: 16 }, src: AMD }],
-  // Intel 12 代：DDR5-4800 / DDR4-3200，PCIe 5.0 x16
-  [/I[3579][\s-]*12\d{3}/i, { mem: { DDR5: 4800, DDR4: 3200 }, pcie: { gen: 5, lanes: 16 }, src: INTEL }],
+  [/RYZEN\s*[3579]\s*9\d{3}|锐龙\s*9\s*9\d{3}/i, { mem: { DDR5: 5600 }, pcie: { gen: 5, lanes: 16 }, storagePcie: { gen: 5, lanes: 4 }, src: AMD }],
+  // Intel 12 代：DDR5-4800 / DDR4-3200，PCIe 5.0 x16，CPU 直连 M.2 PCIe 4.0 x4
+  [/I[3579][\s-]*12\d{3}/i, { mem: { DDR5: 4800, DDR4: 3200 }, pcie: { gen: 5, lanes: 16 }, storagePcie: { gen: 4, lanes: 4 }, src: INTEL }],
   // Intel 13 / 14 代：i3、i5-13400/14400 及以下 DDR5-4800，i5-13600K/14600K 及以上 DDR5-5600；DDR4-3200
-  [/I[35][\s-]*1[34](1\d\d|4\d\d)/i, { mem: { DDR5: 4800, DDR4: 3200 }, pcie: { gen: 5, lanes: 16 }, src: INTEL }],
-  [/I[3579][\s-]*1[34]\d{3}/i, { mem: { DDR5: 5600, DDR4: 3200 }, pcie: { gen: 5, lanes: 16 }, src: INTEL }],
-  // Intel Core Ultra 200S（非 Plus）：DDR5-6400、PCIe 5.0
-  // “Plus” 系列（250K Plus 等）规格不同，不在此表（由人工修正数据提供）；名称以 Plus 结尾的不匹配
-  [/ULTRA\s*[579]\s*2\d{2}[A-Z]*$/i, { mem: { DDR5: 6400 }, pcie: { gen: 5, lanes: 16 }, src: INTEL }],
+  [/I[35][\s-]*1[34](1\d\d|4\d\d)/i, { mem: { DDR5: 4800, DDR4: 3200 }, pcie: { gen: 5, lanes: 16 }, storagePcie: { gen: 4, lanes: 4 }, src: INTEL }],
+  [/I[3579][\s-]*1[34]\d{3}/i, { mem: { DDR5: 5600, DDR4: 3200 }, pcie: { gen: 5, lanes: 16 }, storagePcie: { gen: 4, lanes: 4 }, src: INTEL }],
+  // Intel Core Ultra 200S Plus（Arrow Lake-S Refresh）：原生支持 DDR5-7200、PCIe 5.0 x16 + M.2 PCIe 5.0 x4；K/KF 不附带散热器
+  [/ULTRA\s*[579]\s*2\d{2}[A-Z]*\s+PLUS\b/i, { mem: { DDR5: 7200 }, pcie: { gen: 5, lanes: 16 }, storagePcie: { gen: 5, lanes: 4 }, stockCoolerIncluded: false, src: INTEL }],
+  // Intel Core Ultra 200S（非 Plus）：DDR5-6400、PCIe 5.0 x16 + M.2 PCIe 5.0 x4
+  [/ULTRA\s*[579]\s*2\d{2}[A-Z]*$/i, { mem: { DDR5: 6400 }, pcie: { gen: 5, lanes: 16 }, storagePcie: { gen: 5, lanes: 4 }, src: INTEL }],
 ];
 
 // 零售盒装附带散热器的型号（厂商规格 “Thermal Solution (PIB)” / Intel Box 附散热器）。
@@ -62,7 +63,7 @@ const GPU_LINKS = [
 ];
 const gpuGen = chip => (/RTX\s*50/i.test(chip) ? 5 : /RX\s*90/i.test(chip) ? 5 : /RTX\s*[34]0|RX\s*[67]\d{3}|ARC/i.test(chip) ? 4 : /RTX\s*20|GTX\s*16/i.test(chip) ? 3 : null);
 
-/** 按 CPU 名称补平台字段：cpuMemoryMaxMTsByType、cpuMemoryMaxMTs（CPU 内存类型对应值）、pcieLink、stockCoolerIncluded */
+/** 按 CPU 名称补平台字段：cpuMemoryMaxMTsByType、cpuMemoryMaxMTs（CPU 内存类型对应值）、pcieLink、storagePcieLink、stockCoolerIncluded */
 export function cpuPlatform(name, specs = {}) {
   const out = {};
   const rule = CPU_RULES.find(([re]) => re.test(name))?.[1];
@@ -71,9 +72,11 @@ export function cpuPlatform(name, specs = {}) {
     const type = String(specs.memoryType ?? '').toUpperCase();
     out.cpuMemoryMaxMTs = rule.mem[type] ?? Math.max(...Object.values(rule.mem));
     out.pcieLink = rule.pcie;
+    if (rule.storagePcie) out.storagePcieLink = rule.storagePcie;
+    if (rule.stockCoolerIncluded === false) out.stockCoolerIncluded = false;
     out.platformSource = rule.src;
   }
-  if (/盒装|BOX/i.test(String(specs.packaging ?? '')) && BOXED_WITH_COOLER.some(re => re.test(name))) out.stockCoolerIncluded = true;
+  if (out.stockCoolerIncluded !== false && /盒装|BOX/i.test(String(specs.packaging ?? '')) && BOXED_WITH_COOLER.some(re => re.test(name))) out.stockCoolerIncluded = true;
   return out;
 }
 
@@ -86,7 +89,17 @@ export function gpuPlatform(chipset) {
   return gen ? { pcieLink: { gen, lanes: hit[2] }, platformSource: /RTX|GTX/i.test(chip) ? NVIDIA : /ARC/i.test(chip) ? ARC : RADEON } : {};
 }
 
-/** 主板第一条显卡插槽：桌面芯片组主板第一条 x16 插槽为 CPU 直连 x16，版本取主板标注的 PCIe 版本 */
+/** 主板平台基线：第一条显卡插槽 CPU 直连 x16；现代平台芯片组 Resizable BAR 支持基线 */
 export function boardPlatform(specs = {}) {
-  return specs.pcieGen ? { gpuPcieLink: { gen: specs.pcieGen, lanes: 16, basis: '第一条 x16 插槽（CPU 直连），版本取主板标注' } } : {};
+  const out = {};
+  if (specs.pcieGen) out.gpuPcieLink = { gen: specs.pcieGen, lanes: 16, basis: '第一条 x16 插槽（CPU 直连），版本取主板标注' };
+  const cs = String(specs.chipset ?? '').toUpperCase().match(/\b([ABHQXZ])(\d)(\d{2})E?\b/);
+  const socket = String(specs.socket ?? '').toUpperCase();
+  if (cs) {
+    const series = Number(cs[2]) * 100;
+    const isAmd = /^AM[45]$/.test(socket) || (cs[1] === 'A' && series >= 300) || (cs[1] === 'X' && series >= 300 && series <= 800 && series !== 299) || (cs[1] === 'B' && [350, 450, 550, 650, 840, 850].includes(series));
+    if ((isAmd && series >= 500) || (!isAmd && series >= 600)) out.rebarSupport = true;
+    else if ((isAmd && series === 400) || (!isAmd && (series === 400 || series === 500))) out.rebarSupport = 'bios-update';
+  }
+  return out;
 }
