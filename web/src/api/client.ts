@@ -230,6 +230,14 @@ export interface PlanResult extends RecommendResult {
   formalRecommendation?: boolean;
   hostTotalCents?: number;
   additionalCosts?: { id: string; name: string; priceCents: number; quantity?: number; unitPriceCents?: number | null; priceSource?: 'estimate' | 'user' | 'case-record' | 'unknown'; estimatedRangeCents?: (number | null)[]; basis?: string }[];
+  /** V2.2.3：关键风险局部替换记录 */
+  riskSearch?: { result: 'none' | 'resolved' | 'reduced' | 'unresolved'; blockingChecks: string[]; replacements: { slot: string; from: string; to: string }[]; reason?: string; linkedSlots?: string[]; combosEvaluated: number; slots?: Record<string, { candidates: number; eliminated: Record<string, number> }>; safetyFirst?: { reason: string; coreChangePercent: number } };
+  /** V2.2.3：主方案仍有阻断项时的独立安全备选（无阻断项，核心性能较低） */
+  safeAlternative?: Pick<PlanResult, 'picks' | 'totalCents' | 'compatibility' | 'additionalCosts' | 'igpu' | 'stockCooler'> & { coreChangePercent: number | null; extraCents: number; reason: string };
+  /** V2.2.3：CPU 散热证据不足时的降功耗运行方案（性能降幅未量化） */
+  powerLimitOption?: { targetW: number; fullPowerW: number | null; feasible: boolean; biosSettings?: string[]; affectedMetrics?: string[]; performanceDelta: null; performanceNote?: string; thermalLoadW?: { cpu: number; gpu: number; total: number }; remainingConditions?: string[] };
+  /** V2.2.3：生成时间、版本、数据快照、策略与约束、关键风险、评分维度 */
+  diagnostics?: { generatedAt: string; softwareVersion: string; rulesVersion: string; dataSnapshotId: string; strategy: string; constraints: Record<string, unknown>; risks: { id: string; label: string; status: string; blocking: boolean; detail: string }[]; scoreDimensions: Record<string, number>; performanceBasis: string; performanceIsProxy: boolean; cpuPerformanceAssumption: string };
   /** V2.2.2：核心八件套 + 必需附件 = 完整可安装总价（totalCents） */
   coreTotalCents?: number;
   costBreakdown?: { coreCents: number; requiredAccessoriesCents: number; optionalAccessoriesCents: number; completeBuildCents: number; estimatedRangeCents: number[]; accessoryPriceStatus: 'known' | 'estimated' | 'unknown' } | null;

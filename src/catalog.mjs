@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { loadOverlay, overlayView } from './data-patches.mjs';
 import { join } from 'node:path';
 import { invalid, ApiError } from './api-error.mjs';
 import { peripheralTypes, slotTypes } from './builds.mjs';
@@ -548,7 +550,8 @@ function pagination(value, fallback, min, max, field) {
   return number;
 }
 
-export function createCatalog(directory = '.runtime', manualOverrides) {
+export function createCatalog(directory = '.runtime', manualOverrides, { patchOverlay = fileURLToPath(new URL('../data/hardware-patches.json', import.meta.url)) } = {}) {
+  const patchView = overlayView(loadOverlay(patchOverlay));
   const overrides = manualOverrides ?? readImported(directory, 'spec-overrides.json').overrides ?? {};
   const imported = readImported(directory);
   const zol = readImported(directory, 'zol-catalog.json');
@@ -556,6 +559,9 @@ export function createCatalog(directory = '.runtime', manualOverrides) {
   const items = addImages(addTrends(addPriceConfidence(addClassEstimates(addEstimates(addPowerEstimates(addZol(mergeCatalog(imported.items), zol.items)
     // 从参数表补全接口数量、尺寸、12V 输出等字段（只补缺的，不覆盖）
     .map(item => correctHardware({ ...item, specs: enrichSpecs(item) }, overrides))
+    // 2.2.3：数据补丁覆盖层（data/hardware-patches.json，由 scripts/import-data-patch.mjs 写入，可回滚）在内置修正之后应用
+    .map(item => (patchView.updates.has(item.id) ? { ...item, specs: { ...item.specs, ...patchView.updates.get(item.id) }, dataPatched: true } : item))
+    .concat(patchView.added.map(item => ({ aliases: [], partNumbers: [], ...item })))
     .filter(item => !notForDesktop(item))
     .map(item => item.category === 'CPU' && WORKSTATION_CPU.test(item.name) ? { ...item, workstation: true } : item))))), readPriceHistory(directory))
     .map(item => {

@@ -9,7 +9,7 @@ const base = () => ({
   MOTHERBOARD: part('B650M', { socket: 'AM5', chipset: 'B650', memoryType: 'DDR5', formFactor: 'Micro ATX', memorySlots: 4, maxMemoryGB: 192, m2Slots: 2, pcieGen: 4, videoOutputs: true }),
   RAM: part('DDR5 6000 32GB', { memoryType: 'DDR5', capacityGB: 32, modules: 2, speedMTs: 6000 }),
   GPU: part('RTX 5070', { chipset: 'GeForce RTX 5070', lengthMm: 300, boardPowerWatts: 250, recommendedPsuWatts: 650, powerPins: { pin6: 0, pin8: 0, pin16: 1 } }),
-  PSU: part('850W', { ratedWatts: 850, pcie8Count: 4, pin16Count: 1, atxVersion: '3.1', rail12vAmps: 70 }),
+  PSU: part('850W', { ratedWatts: 850, pcie8Count: 4, pin16Count: 1, connectorPowerRating: 450, atxVersion: '3.1', rail12vAmps: 70 }),
   SSD: part('1TB', { interface: 'M.2 PCIe 4.0' }),
   CASE: part('ATX', { maxBoardFormFactor: 'ATX', maxGpuLengthMm: 380, maxCoolerHeightMm: 165 }),
   COOLER: part('风冷', { heightMm: 155, sockets: ['AM4', 'LGA1700'] }),
@@ -34,7 +34,9 @@ test('电源字段解析：额定功率取参数表，不从型号名推断；�
 
 test('16pin 显卡：原生 PASS，转接线够用 CONDITIONAL，8pin 不够 FAIL，缺数据 UNKNOWN', () => {
   const gpu = { powerPins: { pin6: 0, pin8: 0, pin16: 1 }, boardPowerWatts: 360 };
-  assert.equal(gpuPowerCheck(gpu, { pin16Count: 1 }).status, PASS);
+  // 2.2.3：原生 16pin 需要线材额定等级；未知时各功耗等级一律 UNKNOWN（不按电源总功率推断）
+  assert.equal(gpuPowerCheck(gpu, { pin16Count: 1, connectorPowerRating: 450 }).status, PASS);
+  assert.equal(gpuPowerCheck(gpu, { pin16Count: 1 }).status, UNKNOWN);
   assert.equal(gpuPowerCheck(gpu, { pin16Count: 0, pcie8Count: 4 }).status, CONDITIONAL);
   // 2.2.2：原生 16pin 明确没有时 8pin 不够为 FAIL；原生接口未知时不能判死（可能有未记录的原生线）
   assert.equal(gpuPowerCheck(gpu, { pcie8Count: 2, native16Pin: false }).status, FAIL);

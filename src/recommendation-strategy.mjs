@@ -32,7 +32,7 @@ export function selectionValue(build, strategy, tier, target) {
 }
 
 // 核心性能视为相同的容差（对数刻度，约 0.5%）：同 CPU / 显卡的组合核心值完全相同；不同型号差异小于测量精度时不强行区分
-const CORE_EPSILON = 0.005;
+export const CORE_EPSILON = 0.005;
 
 export function selectBuild(pool, strategy, tier, target) {
   const lambda = (STRATEGY_COST_PENALTY[strategy] ?? STRATEGY_COST_PENALTY.balanced)[tier] ?? 0.12;

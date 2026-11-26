@@ -69,9 +69,27 @@ export function coolingCapacity(coolerSpecs, { stock = false, cpu = {}, quiet = 
   const eng = ENGINEERING_LIMITS.find(l => l.test(p));
   if (eng) {
     const watts = quiet ? Math.floor(eng.watts / 1.3) : eng.watts;
-    return { watts, level: 'engineering', basis: `低功耗工程判断（${eng.basis}，不按塔高推断）`, sourceUrl: null, confidence: 'low' };
+    return { watts, level: 'engineering', basis: `低功耗工程推断（${eng.basis}；${eng.watts}W 为推荐策略适用上限的经验值，不是实测散热能力；不按塔高推断）`, sourceUrl: null, confidence: 'low' };
   }
   return { watts: 0, level: 'none', basis: '没有实测、厂商标称或可用的结构数据（热管数量 / 冷排尺寸）', sourceUrl: null, confidence: 'none' };
+}
+
+/**
+ * 散热依据分项（2.2.3）：厂商标称、独立测试功耗、工程推断上限、推荐策略适用上限分开记录，不互相替代。
+ */
+export function coolingEvidenceBreakdown(coolerSpecs = {}, { stock = false, cpu = {}, quiet = false } = {}) {
+  const p = coolerProfile(coolerSpecs ?? {});
+  const tested = p.tests.filter(t => https(t.source_url) && t.tested_power_w > 0);
+  const best = tested.reduce((a, b) => (!a || b.tested_power_w > a.tested_power_w ? b : a), null);
+  const eng = ENGINEERING_LIMITS.find(l => l.test(p));
+  const cap = coolingCapacity(coolerSpecs, { stock, cpu, quiet });
+  return {
+    vendorRatingW: p.vendor_rating_w && https(p.vendor_source_url) ? p.vendor_rating_w : null,
+    testedPowerW: best?.tested_power_w ?? null, testedCpu: best?.tested_cpu ?? null, testedTempC: best?.cpu_temperature_c ?? null, testedDurationMin: best?.sustained_test_duration ?? null, testedSourceUrl: best?.source_url ?? null,
+    engineeringLimitW: stock ? 95 : eng?.watts ?? null,
+    policyCapW: cap.level === 'vendor_rating' ? Math.min(cap.watts, VENDOR_RATING_MAX_W) : cap.watts,
+    level: cap.level,
+  };
 }
 
 /** 证据能否“覆盖”该持续负载：厂商标称最多用于 200W，更高功耗只认实测 */

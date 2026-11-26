@@ -240,7 +240,8 @@ test('11 升级说明与实际配置一致：每个下降的指标都写明原�
 
 test('12 不同预算、用途、策略的结果互不串用（无跨请求缓存）', () => {
   const items = makeCatalog();
-  const strip = r => JSON.stringify(r.plans);
+  // 2.2.3：方案带生成时间（diagnostics.generatedAt），比较前去掉时间戳
+  const strip = r => JSON.stringify(r.plans, (k, v) => (k === 'generatedAt' ? undefined : v));
   const a1 = run(items, 12000);
   const b = optimizePlans(items, { budgetCents: 3000000, scenarios: ['4k'], strategy: 'performance' });
   const c = run(items, 30000);

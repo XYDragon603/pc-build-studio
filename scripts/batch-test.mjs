@@ -70,6 +70,24 @@ function invariants(plan, prev, request) {
   const cable = checks.find(c => c.id === 'gpuCable');
   if (cable && cable.status !== 'UNKNOWN' && cable.status !== 'FAIL' && /按散热器限高.*推断/.test(cable.detail)) fails.push('16pin 供电线空间仍用散热器限高确认');
   if (plan.assessment?.budget === 'met' && plan.costBreakdown?.accessoryPriceStatus && plan.costBreakdown.accessoryPriceStatus !== 'known' && plan.costBreakdown.requiredAccessoriesCents > 0) fails.push('附件为估算价却标为预算满足');
+  // V2.2.3 不变量：诊断信息、局部替换记录、安全备选、机箱热负载分级、显卡有效限长一致、16pin 线材额定、内存与链路描述、严格预算上限
+  const d = plan.diagnostics;
+  if (!d?.generatedAt || !d?.dataSnapshotId || !d?.rulesVersion || !d?.softwareVersion || !d?.constraints) fails.push('缺少诊断信息（生成时间 / 快照 / 版本 / 约束）');
+  if (!plan.riskSearch) fails.push('缺少局部替换记录');
+  else if (!plan.riskSearch.safetyFirst && JSON.stringify([...(plan.riskSearch.final ?? plan.riskSearch.initial).blockingChecks].sort()) !== JSON.stringify(checks.filter(c => c.blocking).map(c => c.id).sort())) fails.push('替换记录与最终阻断项不一致');
+  if (checks.some(c => c.blocking) && plan.riskSearch && !['unresolved', 'reduced'].includes(plan.riskSearch.result)) fails.push(`仍有阻断项但替换结果为 ${plan.riskSearch.result}`);
+  if (plan.safeAlternative && plan.safeAlternative.compatibility.checks.some(c => c.blocking || c.status === 'FAIL')) fails.push('安全备选含阻断项');
+  if (checks.some(c => c.blocking) && plan.formalRecommendation) fails.push('待核实方案被标为正式推荐');
+  const air = checks.find(c => c.id === 'caseAirflow');
+  if (air?.evidence?.thermalRiskLevel === 'critical' && air.status === 'CONDITIONAL') fails.push('>600W 热负载仅凭风扇位条件通过');
+  const len = checks.find(c => c.id === 'gpuLength')?.evidence;
+  if (len?.effectiveLimitMm != null && (Math.abs(len.effectiveLimitMm - (len.rawLimitMm - len.frontFanAllowanceMm - len.radiatorAllowanceMm)) > 0.05 || Math.abs(len.marginMm - (len.effectiveLimitMm - len.gpuLengthMm)) > 0.05)) fails.push('显卡有效限长计算与说明不一致');
+  const gp = checks.find(c => c.id === 'gpuPower'); const psuSpecs = pick(plan, 'PSU')?.specs ?? {};
+  if (gp?.status === 'PASS' && pick(plan, 'GPU')?.specs?.powerPins?.pin16 && (psuSpecs.native16Pin || psuSpecs.pin16Count > 0 || psuSpecs.native12v2x6 || psuSpecs.native12vhpwr) && !(psuSpecs.connectorPowerRating ?? psuSpecs.native16PinCableWatts)) fails.push('原生 16pin 线材额定未知却判 PASS');
+  if (checks.some(c => c.id === 'memorySpeed' && /同平台/.test(c.detail))) fails.push('内存频率仍按同平台普遍值描述');
+  if (checks.some(c => ['pcie', 'ssdPcie'].includes(c.id) && /实际/.test(c.label))) fails.push('链路仍称为实际链路');
+  if (request.maxOverPercent === 0 && plan.costBreakdown && plan.costBreakdown.estimatedRangeCents[1] + peripherals + locked > plan.targetCents) fails.push('严格预算下区间上限超出本档目标');
+  if (plan.powerLimitOption?.feasible && plan.powerLimitOption.performanceDelta != null) fails.push('降功耗方案给出了没有依据的性能降幅');
   const minSsd = request.workload?.minSsdGB;
   if (minSsd && cap(plan, 'SSD') < minSsd * 0.93 && !(plan.unmetRequirements ?? []).some(r => /硬盘/.test(r))) fails.push('低于指定 SSD 容量却未标明');
   const minVram = request.workload?.minVramGB;
@@ -89,7 +107,13 @@ async function run(group, label, request, extraChecks = () => []) {
     plans: plans.map(p => ({ tier: p.id, infeasible: !!p.infeasible, recommendationStatus: p.recommendationStatus, totalCents: p.totalCents, targetCents: p.targetCents,
       overall: p.compatibility?.overall ?? null, blockingChecks: p.assessment?.blockingChecks ?? [], score: p.score?.total ?? null, core: p.corePerformance?.value ?? null,
       sameAs: p.sameAs ?? null, unmet: p.unmetRequirements ?? [], parts: Object.fromEntries(SLOT_KEYS.map(s => [s, pick(p, s) ? { id: pick(p, s).id, name: pick(p, s).name, priceCents: pick(p, s).estimatedPriceCents, capacityGB: pick(p, s).specs?.capacityGB ?? null } : null])),
-      stockCooler: !!p.stockCooler, igpu: !!p.igpu, additionalCosts: p.additionalCosts ?? [], notes: p.notes })) };
+      stockCooler: !!p.stockCooler, igpu: !!p.igpu, additionalCosts: p.additionalCosts ?? [], costBreakdown: p.costBreakdown ?? null,
+      nonPassChecks: (p.compatibility?.checks ?? []).filter(c => !['PASS', 'NOT_APPLICABLE'].includes(c.status)).map(c => ({ id: c.id, status: c.status, blocking: c.blocking, critical: c.critical })),
+      riskSearch: p.riskSearch ? { result: p.riskSearch.result, initialBlocking: p.riskSearch.initial?.blockingChecks ?? [], initialParts: p.riskSearch.initial?.parts ?? null, replacements: p.riskSearch.replacements, linkedSlots: p.riskSearch.linkedSlots ?? [], combosEvaluated: p.riskSearch.combosEvaluated, reason: p.riskSearch.reason ?? null, slots: p.riskSearch.slots, safetyFirst: p.riskSearch.safetyFirst ?? null, initialPowerLimitOption: p.riskSearch.initialPowerLimitOption ?? null } : null,
+      safeAlternative: p.safeAlternative ? { totalCents: p.safeAlternative.totalCents, coreChangePercent: p.safeAlternative.coreChangePercent, parts: Object.fromEntries(SLOT_KEYS.map(s => [s, pick(p.safeAlternative, s)?.name ?? null])) } : null,
+      powerLimitOption: p.powerLimitOption ?? null, diagnostics: p.diagnostics ?? null,
+      upgrades: (p.upgrades ?? []).map(u => ({ totalCents: u.totalCents, extraCents: u.extraCents, reason: u.reason, blocking: u.compatibility.checks.filter(c => c.blocking).map(c => c.id), parts: Object.fromEntries(SLOT_KEYS.map(s => [s, pick(u, s)?.name ?? null])) })),
+      notes: p.notes })) };
   runs.push({ ...record, raw: plans });
   console.log(`${record.passed ? '✓' : '✗'} [${group}] ${label} ${durationMs}ms${failures.length ? ` — ${failures.slice(0, 3).join('；')}` : ''}`);
   return { plans, data };
@@ -187,7 +211,8 @@ const summary = {
   byStrategy: Object.fromEntries(STRATEGIES.map(s => [s, summarizePlans(base108.filter(x => x.strategy === s))])),
 };
 await writeFile(join(output, 'batch-results.json'), JSON.stringify({ summary, runs: runs.map(({ raw, ...r }) => r) }, null, 2) + '\n');
-const md = ['# V2.2.2 批量测试结果', '', `测试时间：${summary.testedAt}。命令：\`node scripts/batch-test.mjs\`。`, '',
+if (process.env.CC_RESULTS) await writeFile(process.env.CC_RESULTS, JSON.stringify({ summary, runs: runs.map(({ raw, ...r }) => r) }, null, 2) + '\n');
+const md = ['# V2.2.3 批量测试结果', '', `测试时间：${summary.testedAt}。命令：\`node scripts/batch-test.mjs\`。`, '',
   `共 ${summary.runs} 次请求，通过 ${summary.passed}，失败 ${summary.failed}；基础矩阵 ${summary.basePlans} 套方案。`, '',
   '| 测试组 | 请求数 | 失败 |', '|---|---:|---:|', ...Object.entries(summary.byGroup).map(([g, v]) => `| ${g} | ${v.runs} | ${v.failed} |`), '',
   '## 失败明细', '', ...runs.filter(r => !r.passed).flatMap(r => [`- [${r.group}] ${r.label}：${r.failures.join('；')}`]), runs.every(r => r.passed) ? '无' : '', ''];

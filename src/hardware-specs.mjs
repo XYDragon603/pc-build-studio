@@ -1,5 +1,5 @@
 import { fanMountCapacity, requiredCaseFans } from './accessories.mjs';
-import { capacityCovers, coolingCapacity, powerLimitOption, VENDOR_RATING_MAX_W } from './thermal-evidence.mjs';
+import { capacityCovers, coolingCapacity, coolingEvidenceBreakdown, powerLimitOption, VENDOR_RATING_MAX_W } from './thermal-evidence.mjs';
 // Shared, explicit physical formats. Product names and case exterior dimensions
 // are never used as evidence of motherboard support.
 export const BOARD_FORMATS = ['MINI-ITX', 'MICRO ATX', 'ATX', 'EATX'];
@@ -65,9 +65,11 @@ export function memorySpeedCheck(cpu, board, ram, sku) {
   if (ram.jedecMTs && ram.jedecMTs < target) return { status: 'CONDITIONAL', factors, detail: `JEDEC ${ram.jedecMTs} MT/s。标称 ${target} MT/s 需核对 XMP/EXPO、主板 QVL 和稳定性。${why}` };
   // 在 CPU 官方上限内、不超过 2 条：频率本身在规格内；若为 XMP / EXPO 标称需在 BIOS 开启（条件项，不是未知项）
   // 主板内存上限未知时，只认定所有同平台主板普遍支持的频率（DDR4 ≤3200、DDR5 ≤6000）；更高频率仍需主板与 QVL
-  const boardOk = board.memoryMaxMTs ? target <= board.memoryMaxMTs : target <= (/DDR4/i.test(ram.memoryType ?? '') ? 3200 : 6000);
-  if (published && target <= limit && boardOk && (ram.modules ?? 2) <= 2) return { status: 'CONDITIONAL', factors, detail: `标称 ${target} MT/s，在 CPU 官方支持的 ${published} MT/s 以内。若为 XMP / EXPO 标称频率，需在 BIOS 开启；在规格内不等于保证稳定，4 条或双面颗粒可能需要降频。${why}` };
-  const reason = !published ? 'CPU 内存规格未知' : !boardOk ? `CPU 规格已知（${published} MT/s），但 ${target} MT/s 高于同平台主板普遍支持的频率，主板上限未录入` : '条数超过 2 条';
+  // 2.2.3：主板数据优先（具体型号的内存上限 / QVL）；主板未录入时不再用“同平台普遍支持 DDR4-3200 / DDR5-6000”当作确定上限。
+  // 主板上限 / QVL 未录入时一律 UNKNOWN（非关键，不影响按 JEDEC 频率运行），等待具体主板数据；不用 CPU 官方频率代替主板支持。
+  const boardOk = board.memoryMaxMTs ? target <= board.memoryMaxMTs : false;
+  if (published && target <= limit && boardOk && (ram.modules ?? 2) <= 2) return { status: 'CONDITIONAL', factors, detail: `标称 ${target} MT/s，${board.memoryMaxMTs ? `在主板上限 ${board.memoryMaxMTs} MT/s 与 ` : '主板上限未录入；在 '}CPU 官方 ${published} MT/s 以内。若为 XMP / EXPO 标称频率需在 BIOS 开启；不保证一定开机或稳定，4 条或双面颗粒可能需要降频。${why}` };
+  const reason = !published ? 'CPU 内存规格未知' : !board.memoryMaxMTs ? `CPU 规格已知（官方 ${published} MT/s），主板内存上限 / QVL 未录入，不能确认这块主板支持 ${target} MT/s` : !boardOk ? `高于主板上限 ${board.memoryMaxMTs} MT/s` : '条数超过 2 条';
   return { status: 'UNKNOWN', factors, detail: `标称 ${target} MT/s：${reason}，不能确认能以标称频率运行（不影响开机，最低按 JEDEC 频率运行）。${why}` };
 }
 
@@ -107,7 +109,8 @@ export function coolerThermalCheck(cpu, cooler, pc, board = {}, workload = {}, {
     evidence: { type: 'measurement', coveredWatts: tested.powerWatts, sourceUrl: tested.sourceUrl } };
   const cap = coolingCapacity(cooler ?? {}, { stock, cpu, quiet: workload.quiet, maxNoiseDbA: workload.maxNoiseDbA ?? 35 });
   const evidence = { type: cap.level === 'measured' ? 'measurement' : cap.level === 'none' ? 'incomplete' : cap.level === 'vendor_rating' ? 'vendor-rating' : 'engineering-judgment',
-    level: cap.level, coveredWatts: cap.watts, requiredWatts: watts, sourceUrl: cap.sourceUrl, confidence: cap.confidence };
+    level: cap.level, coveredWatts: cap.watts, requiredWatts: watts, sourceUrl: cap.sourceUrl, confidence: cap.confidence,
+    ...coolingEvidenceBreakdown(cooler ?? {}, { stock, cpu, quiet: workload.quiet }), appliedPowerLimitW: limited ?? null, sustainedTempC: null };
   if (capacityCovers(cap, watts)) {
     return { status: 'CONDITIONAL', critical: false, evidence,
       detail: `CPU 持续负载 ${watts}W${limitNote}。依据：${cap.basis}${cap.sourceUrl ? `（${cap.sourceUrl}）` : ''}，覆盖 ${cap.watts}W。${cap.level === 'measured' ? '测试平台与本机机箱风道不同，' : ''}本机持续满载温度${workload.quiet ? '与噪音' : ''}仍需实测确认。` };
@@ -117,6 +120,8 @@ export function coolerThermalCheck(cpu, cooler, pc, board = {}, workload = {}, {
   return { status: 'UNKNOWN', critical: true, evidence,
     detail: `CPU 持续负载 ${watts}W${limitNote}。${cap.level === 'none' ? `该散热器${cap.basis}` : `现有依据（${cap.basis}）只覆盖约 ${cap.level === 'vendor_rating' ? Math.min(cap.watts, VENDOR_RATING_MAX_W) : cap.watts}W${cap.level === 'vendor_rating' && watts > VENDOR_RATING_MAX_W ? `，高于 ${VENDOR_RATING_MAX_W}W 的持续负载必须有实测` : ''}`}，不能确认能压住 ${watts}W 持续负载（塔高 / 冷排尺寸不作为散热能力依据）。${option ? `可选运行条件：在 BIOS 将 CPU 持续功耗（PL1/PL2 或 PPT）限制到 ≤${option}W，多核性能会下降，幅度未量化；` : ''}或换用有覆盖 ${watts}W 实测证据的散热器。` };
 }
+/** 整机持续热负载风险等级（2.2.3）：low ≤250W，medium ≤450W，high ≤600W，critical >600W */
+export const thermalRiskLevel = total => (total > 600 ? 'critical' : total > 450 ? 'high' : total > 250 ? 'medium' : 'low');
 export function caseThermalCheck(cpu, gpu, pc, board = {}, workload = {}) {
   const watts = sustainedPower(cpu, board, workload);
   if (watts == null || (gpu && gpu.boardPowerWatts == null && gpu.maxPowerWatts == null && gpu.tdpWatts == null)) return { status: 'UNKNOWN', critical: true, detail: '缺少 CPU / GPU 持续负载功耗，不能确认机箱散热覆盖此配置。' };
@@ -137,8 +142,12 @@ export function caseThermalCheck(cpu, gpu, pc, board = {}, workload = {}) {
     if (cap.intake < need.intake || cap.exhaust < need.exhaust) {
       return { status: 'UNKNOWN', critical: high, detail: `CPU ${watts}W + GPU ${gpuW}W，共约 ${need.total}W：需要 ${need.intake} 进风 + ${need.exhaust} 排风，机箱已知风扇位只有进风 ${cap.intake} / 排风 ${cap.exhaust} 个，风道能力不足或数据不全，不能确认散热。` };
     }
+    // 2.2.3：风扇位是物理安装数据，不是散热测试。按持续负载分级：≤450W 工程判断；450–600W 安全类条件项（须实测）；
+    // >600W 没有整机实测为关键待核实（风扇位、网孔都不能确认高功耗长期运行散热）
+    const level = thermalRiskLevel(need.total);
+    if (level === 'critical') return { status: 'UNKNOWN', critical: true, thermalRiskLevel: level, detail: `CPU ${watts}W + GPU ${gpuW}W，共约 ${need.total}W 持续负载（>600W）。机箱风扇位进风 ${cap.intake} / 排风 ${cap.exhaust} 个，${fanText}；风扇位与网孔只是安装条件，不能确认此负载长期运行的温度。需要覆盖该负载的整机持续温度测试，或降低持续功耗。` };
     const meshNote = need.total > 450 ? (pc?.frontIntake === 'mesh' ? '前面板为网孔进风。' : '前面板进风结构（网孔 / 封闭玻璃）未公布：高负载下须确认为网孔或有足够侧进风开孔。') : '';
-    return { status: 'CONDITIONAL', critical: false, intakeKnown: pc?.frontIntake === 'mesh', detail: `CPU ${watts}W + GPU ${gpuW}W，共约 ${need.total}W。机箱风扇位进风 ${cap.intake} / 排风 ${cap.exhaust} 个，满足 ${fanText}。${meshNote}${basis}` };
+    return { status: 'CONDITIONAL', critical: level === 'high', thermalRiskLevel: level, intakeKnown: pc?.frontIntake === 'mesh', detail: `CPU ${watts}W + GPU ${gpuW}W，共约 ${need.total}W。机箱风扇位进风 ${cap.intake} / 排风 ${cap.exhaust} 个，满足 ${fanText}。${meshNote}${basis}` };
   }
   const positions = pc?.intakePositions?.length && pc?.exhaustPositions?.length;
   if (positions && !high) {

@@ -30,8 +30,8 @@ function catalog({ fanCase = {} } = {}) {
     item('GPU', 3500, 'RTX 5060 Ti 16G', { chipset: 'GeForce RTX 5060 Ti', capacityGB: 16, lengthMm: 250, heightMm: 120, slotWidth: 2, boardPowerWatts: 180, powerPins: { pin8: 1 } }, perf(52, 3600)),
     item('GPU', 14000, 'RTX 4090 D', { chipset: 'GeForce RTX 4090 D', capacityGB: 24, lengthMm: 300, heightMm: 140, slotWidth: 3, boardPowerWatts: 425, powerPins: { pin16: 1 } }, perf(100, 9000)),
     item('GPU', 18000, 'RTX 5090 D', { chipset: 'GeForce RTX 5090 D', capacityGB: 32, lengthMm: 320, heightMm: 145, slotWidth: 3, boardPowerWatts: 575, powerPins: { pin16: 1 } }, perf(120, 12000)),
-    item('MOTHERBOARD', 900, 'B650M', { socket: 'AM5', chipset: 'B650', memoryType: 'DDR5', formFactor: 'MICRO ATX', memorySlots: 4, maxMemoryGB: 192, m2Slots: 2, pcieGen: 4, videoOutputs: true }),
-    item('MOTHERBOARD', 1100, 'B860', { socket: 'LGA1851', chipset: 'B860', memoryType: 'DDR5', formFactor: 'ATX', memorySlots: 4, maxMemoryGB: 192, m2Slots: 2, pcieGen: 5, videoOutputs: true }),
+    item('MOTHERBOARD', 900, 'B650M', { socket: 'AM5', chipset: 'B650', memoryType: 'DDR5', formFactor: 'MICRO ATX', memorySlots: 4, maxMemoryGB: 192, m2Slots: 2, pcieGen: 4, videoOutputs: true, fanHeaders: 6 }),
+    item('MOTHERBOARD', 1100, 'B860', { socket: 'LGA1851', chipset: 'B860', memoryType: 'DDR5', formFactor: 'ATX', memorySlots: 4, maxMemoryGB: 192, m2Slots: 2, pcieGen: 5, videoOutputs: true, fanHeaders: 6 }),
     item('RAM', 700, 'DDR5 32GB', { memoryType: 'DDR5', capacityGB: 32, modules: 2, speedMTs: 6000 }),
     item('RAM', 1300, 'DDR5 64GB', { memoryType: 'DDR5', capacityGB: 64, modules: 2, speedMTs: 6000 }),
     item('SSD', 400, 'NVMe 1TB', { capacityGB: 1000, interface: 'M.2 PCIe 4.0 x4', nand: 'TLC' }),
@@ -186,11 +186,14 @@ test('11 原装散热器包装状态未知时按另购散热器计价', () => {
 
 test('12 修改附件数量与单价后重新计算预算', () => {
   const pc = { fanMounts: [{ position: 'front', count: 3, sizeMm: 120 }, { position: 'rear', count: 1, sizeMm: 120 }] };
-  const est = accessoryCost({ cpuW: 250, gpuW: 575, pc });
+  const est = accessoryCost({ cpuW: 250, gpuW: 575, pc, board: { fanHeaders: 6 } });
+  // 2.2.3：主板风扇接口数量未知时，集线器只进入区间上限（¥40），不计入估算总价
+  const noHeaders = accessoryCost({ cpuW: 250, gpuW: 575, pc });
+  assert.equal(noHeaders.requiredCents, 12000); assert.deepEqual(noHeaders.rangeCents, [6000, 16000]);
   assert.equal(est.additionalFans, 4); assert.equal(est.priceStatus, 'estimated'); assert.deepEqual(est.rangeCents, [6000, 12000]);
   const user = accessoryCost({ cpuW: 250, gpuW: 575, pc, pricing: { fanUnitCents: 1000 } });
   assert.equal(user.requiredCents, 4000);
-  const included = accessoryCost({ cpuW: 250, gpuW: 575, pc: { ...pc, includedFans: 3 }, pricing: { fanUnitCents: 1000 } });
+  const included = accessoryCost({ cpuW: 250, gpuW: 575, pc: { ...pc, includedFans: 3 }, board: { fanHeaders: 6 }, pricing: { fanUnitCents: 1000 } });
   assert.equal(included.additionalFans, 1); assert.equal(included.requiredCents, 1000); assert.equal(included.priceStatus, 'known');
   assert.deepEqual(fanMountCapacity({ fanMounts: [{ position: 'front', count: 3, sizeMm: 120 }, { position: 'front', count: 2, sizeMm: 140 }, { position: 'rear', count: 1, sizeMm: 120 }] }), { intake: 3, exhaust: 1 }, '同位置不同尺寸二选一，不相加');
   // 正式引擎：改单价后完整总价随之变化
@@ -251,8 +254,10 @@ test('15 CPU 内存规格与组合稳定性判断分离', () => {
   assert.equal(r.status, 'UNKNOWN');
   assert.match(r.factors.cpuSpec, /7200/); assert.match(r.factors.boardSpec, /未录入/); assert.match(r.factors.jedec, /未知/); assert.match(r.factors.stability, /未验证/);
   assert.match(r.detail, /CPU 规格已知/);
-  const ok = memorySpeedCheck(cpu, {}, { memoryType: 'DDR5', speedMTs: 6000, modules: 2 });
-  assert.equal(ok.status, 'CONDITIONAL'); assert.match(ok.detail, /不等于保证稳定/);
+  // 2.2.3：主板数据缺失时不再按“同平台普遍 6000”放行；有主板上限后为条件项
+  assert.equal(memorySpeedCheck(cpu, {}, { memoryType: 'DDR5', speedMTs: 6000, modules: 2 }).status, 'UNKNOWN');
+  const ok = memorySpeedCheck(cpu, { memoryMaxMTs: 6400 }, { memoryType: 'DDR5', speedMTs: 6000, modules: 2 });
+  assert.equal(ok.status, 'CONDITIONAL'); assert.match(ok.detail, /不保证一定开机或稳定/);
   assert.equal(memorySpeedCheck(cpu, { memoryMaxMTs: 8000 }, { memoryType: 'DDR5', speedMTs: 6400, modules: 2 }).status, 'CONDITIONAL');
   // 250KF Plus：修正数据带来官方 7200（不再显示未知）
   const kf = correctHardware({ id: 'zol-2179677', category: 'CPU', name: 'Intel 酷睿 Ultra 5 250KF Plus', specs: enrichSpecs({ category: 'CPU', name: 'Intel 酷睿 Ultra 5 250KF Plus', specs: { socket: 'LGA1851' } }) });

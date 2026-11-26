@@ -100,7 +100,8 @@ test('V2.1 10: 无解有独立原因和超预算替代方案', () => {
 });
 test('V2.1 11: 相同快照下结果与候选淘汰记录一致', () => {
   const a = optimizePlans(catalog, opts()), b = optimizePlans(catalog, opts());
-  assert.deepEqual(a.plans, b.plans); assert.deepEqual(a.meta.candidateLog, b.meta.candidateLog); assert.equal(a.meta.stats.globalOptimalityProven, false);
+  const noTime = p => JSON.parse(JSON.stringify(p, (k, v) => (k === 'generatedAt' ? undefined : v)));
+  assert.deepEqual(noTime(a.plans), noTime(b.plans)); assert.deepEqual(a.meta.candidateLog, b.meta.candidateLog); assert.equal(a.meta.dataSnapshotId, b.meta.dataSnapshotId); assert.equal(a.meta.stats.globalOptimalityProven, false);
 });
 test('V2.1 12: 提高档位时显卡核心性能和内存容量不无理由下降', () => {
   const ps = plans(500000, { scenarios: ['creator'] }).filter(p => !p.infeasible);

@@ -55,6 +55,9 @@ export function cpuGeneration(name) {
     // 9850X3D、9950X3D2 是较晚发布的型号，较早出厂的主板 BIOS 可能还不认
     if (series === 9) return { vendor: 'AMD', family: /9850X3D|9950X3D2/.test(n) ? 'zen5-new' : 'zen5' };
   }
+  // 2.2.3：AM4 Athlon APU——200GE / 220GE / 240GE 为 Raven Ridge（Zen），3000G / 300GE / 320GE 为 Picasso（Zen+ APU）
+  if (/ATHLON\s*(?:SILVER\s*|GOLD\s*)?(?:PRO\s*)?2[024]0GE\b/.test(n)) return { vendor: 'AMD', family: 'zen1' };
+  if (/ATHLON\s*(?:SILVER\s*|GOLD\s*)?(?:PRO\s*)?(?:3000G|3[02]0GE)\b/.test(n)) return { vendor: 'AMD', family: 'zen+apu' };
   m = n.match(/ULTRA\s*[3579]\s*(\d{3})([A-Z]*)(\s*PLUS)?/);
   if (m) return { vendor: 'Intel', family: m[3] || /PLUS/.test(n) ? 'arrow-plus' : 'arrow' };
   m = n.match(/I[3579][\s-]*(\d{2})(\d{3})/);
@@ -92,6 +95,8 @@ export function biosSupport(cpuName, boardChipset, boardSpecs = {}) {
     if (cs.series === 500 && ['zen1', 'zen+apu'].includes(gen.family)) return { status: FAIL, detail: `${boardChipset} 不支持这一代 Ryzen（AMD 未提供支持）。` };
     if (cs.series === 500 && gen.family === 'zen3') return update(`${boardChipset} 早期批次`);
     if (cs.series <= 400 && ['zen2', 'zen3'].includes(gen.family)) return update(`${boardChipset} 装 Ryzen ${gen.family === 'zen2' ? '3000' : '5000'}`);
+    // 300 系主板装 Zen+ APU（3000G / 3200G / 3400G）需要较新 BIOS
+    if (cs.series === 300 && gen.family === 'zen+apu') return update(`${boardChipset} 装 Zen+ APU`);
     if (['zen2', 'zen3', 'zen1', 'zen+apu'].includes(gen.family)) return { status: PASS, detail: `${boardChipset} 原生支持。` };
   }
   if (amd && cs.series >= 600) {
@@ -152,7 +157,8 @@ export function gpuPowerCheck(gpu, psu) {
     const pins = adapterPins(watts ?? 600);
     if (c.native16 === true) {
       if (c.native16Watts != null && watts != null && c.native16Watts < watts) return { status: FAIL, detail: `电源原生 ${c.native16Type} 线额定 ${c.native16Watts}W，低于显卡整卡规格 ${watts}W。` };
-      if (c.native16Watts == null && highPower) return { status: UNKNOWN, detail: `显卡整卡规格 ${watts ?? '未知'}W。电源有原生 16pin，但没有该线材的额定功率（450W / 600W）记录，须核对原厂线标注。${CABLE_RULE}` };
+      // 2.2.3：所有功耗等级用同一规则——原生线额定未知即无法确认（12VHPWR / 12V-2x6 线材有 150 / 300 / 450 / 600W 等级），不按整机电源额定功率推断；≥300W 为关键
+      if (c.native16Watts == null) return { status: UNKNOWN, critical: (watts ?? 600) >= 300, detail: `显卡整卡规格 ${watts ?? '未知'}W。电源有原生 16pin，但没有该原厂线材的额定功率等级（150 / 300 / 450 / 600W）记录，须按线材标注或电源厂商说明核对；不能用电源总功率代替线材额定。${CABLE_RULE}` };
       return { status: PASS, detail: `显卡 16pin 供电，电源带原生 ${c.native16Type}${c.native16Watts ? `（线材额定 ${c.native16Watts}W）` : ''}${psu?.atxVersion?.startsWith('3') ? `，ATX ${psu.atxVersion}` : ''}。插头须插到底。${CABLE_RULE}` };
     }
     if (has8 == null) return { status: UNKNOWN, detail: `显卡 16pin 供电。电源${c.native16 === false ? '明确没有原生 16pin' : '是否有原生 16pin 未知'}，也没有显卡 8pin 接口数量，无法确认供电方案。` };
@@ -246,11 +252,46 @@ export function radiatorLayoutCheck(cooler = {}, pc = {}, gpu = null, ram = null
   return { status: UNKNOWN, critical: true, detail: `${notes.map(n => n.text).join('；')}，不能确认冷排安装空间。` };
 }
 
+/**
+ * 显卡有效限长（2.2.3）：显式记录每一项扣减，只扣一次。
+ *   rawLimitMm               机箱公布的显卡限长
+ *   includesFrontFans        机箱说明限长是否已扣除前置风扇（gpuLengthIncludesFrontFans）
+ *   frontFanAllowanceMm      需要前置进风且限长未扣除风扇时 25mm
+ *   radiatorAllowanceMm      水冷只能装前置时：冷排厚度 + 25mm 风扇（风扇装在冷排上，不再另扣前置风扇）
+ *   effectiveLimitMm         rawLimit − 实际扣减
+ *   marginMm                 有效限长 − 显卡长度
+ */
+export function gpuLengthClearance(gpu = {}, pc = {}, { frontFans = false, cooler = null } = {}) {
+  const raw = pc.maxGpuLengthMm ?? null;
+  const len = gpu.lengthMm ?? null;
+  const source = pc.gpuLengthSource ?? (pc.specEvidence?.[0]?.sourceUrl ?? null);
+  const evidence = { rawLimitMm: raw, includesFrontFans: pc.gpuLengthIncludesFrontFans ?? null, frontFanAllowanceMm: 0, radiatorAllowanceMm: 0, effectiveLimitMm: null, gpuLengthMm: len, marginMm: null, source, measurementCondition: pc.gpuLengthCondition ?? '未注明测量条件' };
+  if (!raw || !len) return { status: UNKNOWN, detail: '显卡长度或机箱显卡限长缺少数据。', evidence };
+  const sizes = cooler?.radiatorSizeMm;
+  const frontOnlyRadiator = sizes && !(pc.radiatorPositions ?? []).some(p => p.position === 'top' && p.sizesMm?.includes(sizes)) && (pc.radiatorPositions ?? []).some(p => p.position === 'front' && p.sizesMm?.includes(sizes));
+  if (frontOnlyRadiator) {
+    if (cooler.radiatorThicknessMm == null) return { status: UNKNOWN, detail: `${sizes}mm 冷排只能装前置，冷排厚度未知，无法计算显卡有效限长（机箱限长 ${raw}mm）。`, evidence };
+    evidence.radiatorAllowanceMm = cooler.radiatorThicknessMm + 25;
+  } else if (frontFans && pc.gpuLengthIncludesFrontFans !== true) evidence.frontFanAllowanceMm = 25;
+  const deduct = evidence.radiatorAllowanceMm + evidence.frontFanAllowanceMm;
+  evidence.effectiveLimitMm = mm(raw - deduct);
+  evidence.marginMm = mm(evidence.effectiveLimitMm - len);
+  const parts = [`机箱限长 ${raw}mm`];
+  if (evidence.radiatorAllowanceMm) parts.push(`− 前置冷排 + 风扇 ${evidence.radiatorAllowanceMm}mm`);
+  if (evidence.frontFanAllowanceMm) parts.push('− 前置风扇 25mm（机箱未说明限长已扣除风扇）');
+  if (pc.gpuLengthIncludesFrontFans === true && frontFans) parts.push('（机箱说明限长已扣除前置风扇，不重复扣减）');
+  const calc = `${parts.join(' ')} = 有效限长 ${evidence.effectiveLimitMm}mm；显卡 ${len}mm`;
+  if (len > raw) return { status: FAIL, detail: `显卡 ${len}mm 超过机箱限长 ${raw}mm。`, evidence };
+  if (evidence.marginMm < 0) return { status: deduct && evidence.radiatorAllowanceMm ? FAIL : UNKNOWN, detail: `${calc}，余量 ${evidence.marginMm}mm：装上${evidence.radiatorAllowanceMm ? '前置冷排' : '前置风扇'}后可能顶到显卡。`, evidence };
+  return { status: PASS, detail: `${calc}，余量 ${evidence.marginMm}mm。`, evidence };
+}
+
 const describePins = p => [p.pin8 && `${p.pin8} 个 8pin`, p.pin6 && `${p.pin6} 个 6pin`].filter(Boolean).join(' + ');
 
 /** 整机功耗估算：CPU 峰值 + 显卡整卡功耗 + 75W（主板、内存、硬盘、风扇） */
-export function powerEstimate(cpu, gpu, { igpu = false } = {}) {
-  const cpuW = cpu?.maxPowerWatts ?? null;
+export function powerEstimate(cpu, gpu, { igpu = false, cpuPowerLimitWatts = null } = {}) {
+  // 2.2.3：明确的 CPU 功耗限制（BIOS 限功耗方案）按限制值计算电源需求
+  const cpuW = cpu?.maxPowerWatts != null && cpuPowerLimitWatts > 0 ? Math.min(cpu.maxPowerWatts, cpuPowerLimitWatts) : cpu?.maxPowerWatts ?? null;
   const gpuW = igpu ? 0 : gpuPowerWatts(gpu);
   const load = cpuW != null && gpuW != null ? cpuW + gpuW + 75 : null;
   const calculated = load == null ? null : Math.ceil(load * 1.25);
@@ -332,10 +373,10 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
   // 显卡供电、电源功率、12V
   if (gpu && psu) {
     const r = gpuPowerCheck(gpu, psu);
-    add('gpuPower', '显卡供电接口', r.status, r.detail, true);
+    add('gpuPower', '显卡供电接口', r.status, r.detail, r.critical ?? true);
   }
   if (cpu && psu) {
-    const p = powerEstimate(cpu, gpu, { igpu });
+    const p = powerEstimate(cpu, gpu, { igpu, cpuPowerLimitWatts: workload.cpuPowerLimitWatts });
     if (!psu.ratedWatts) add('psuWatts', '电源功率', UNKNOWN, '电源缺少额定功率。', true);
     else if (!p.recommended) add('psuWatts', '电源功率', UNKNOWN, `电源 ${psu.ratedWatts}W；CPU 或显卡缺少功耗数据，无法估算余量。`, true);
     else add('psuWatts', '电源功率', psu.ratedWatts < p.recommended ? FAIL : p.calculated == null ? UNKNOWN : PASS,
@@ -376,18 +417,14 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
   if (cpu && pc) {
     const r = caseThermalCheck(cpu, gpu, pc, board ?? {}, workload);
     add('caseAirflow', '机箱风道与热负载', r.status, r.detail, r.critical && r.status !== PASS,
-      { type: r.status === PASS ? 'measurement' : r.status === CONDITIONAL ? 'engineering-judgment' : 'incomplete', detail: r.detail });
+      { type: r.status === PASS ? 'measurement' : r.status === CONDITIONAL ? 'engineering-judgment' : 'incomplete', thermalRiskLevel: r.thermalRiskLevel ?? null, detail: r.detail });
   }
   // 机箱：显卡长度、风冷高度 / 冷排、主板板型
   if (pc) {
     if (gpu) {
-      // 2.2.2：整机需要前置进风风扇时，机箱限长若未说明已扣除前置风扇，需留出 25mm 风扇厚度
       const frontFans = cpu && requiredCaseFans(sustainedPower(cpu, board ?? {}, workload) ?? 0, gpuPowerWatts(gpu) ?? 0).intake > 0;
-      const fanRoom = frontFans && pc.gpuLengthIncludesFrontFans !== true ? 25 : 0;
-      if (!gpu.lengthMm || !pc.maxGpuLengthMm) add('gpuLength', '显卡长度', UNKNOWN, '显卡长度或机箱显卡限长缺少数据。', true);
-      else if (gpu.lengthMm > pc.maxGpuLengthMm) add('gpuLength', '显卡长度', FAIL, `显卡 ${gpu.lengthMm}mm，机箱限长 ${pc.maxGpuLengthMm}mm。`, true);
-      else if (gpu.lengthMm + fanRoom > pc.maxGpuLengthMm) add('gpuLength', '显卡长度', UNKNOWN, `显卡 ${gpu.lengthMm}mm，机箱限长 ${pc.maxGpuLengthMm}mm，余量 ${mm(pc.maxGpuLengthMm - gpu.lengthMm)}mm；整机需要前置进风风扇（约 25mm 厚），机箱未说明限长是否已扣除前置风扇，装风扇后可能顶到显卡。`, true);
-      else add('gpuLength', '显卡长度', PASS, `显卡 ${gpu.lengthMm}mm，机箱限长 ${pc.maxGpuLengthMm}mm，余量 ${mm(pc.maxGpuLengthMm - gpu.lengthMm)}mm${fanRoom ? '（已留出前置风扇 25mm）' : ''}。`, true);
+      const r = gpuLengthClearance(gpu, pc, { frontFans, cooler });
+      add('gpuLength', '显卡长度', r.status, r.detail, true, { type: r.status === UNKNOWN ? 'incomplete' : 'specification', ...r.evidence, detail: r.detail });
     }
     if (cooler?.radiatorSizeMm) add('radiator', '水冷排', !pc.maxRadiatorMm ? UNKNOWN : cooler.radiatorSizeMm <= pc.maxRadiatorMm ? PASS : FAIL,
       !pc.maxRadiatorMm ? '机箱缺少冷排支持数据。' : `冷排 ${cooler.radiatorSizeMm}mm，机箱最大 ${pc.maxRadiatorMm}mm。`);
@@ -431,9 +468,16 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
       // 电源长度：机箱公布限长就比较；没公布时，ATX 电源 ≤160mm 且机箱支持 ATX 电源：ATX 标准深度 140mm，主流 ATX 机箱电源仓支持 160mm 以上
       const atxCase = !pc.supportedPsuFormats?.length || pc.supportedPsuFormats.includes('ATX');
       if (pc.maxPsuLengthMm == null && psu.psuLengthMm != null && psu.psuLengthMm <= 160 && (psu.psuFormFactor ?? 'ATX') === 'ATX' && atxCase) {
-        add('psuLength', '电源长度', CONDITIONAL, `ATX 电源长 ${psu.psuLengthMm}mm（ATX 标准深度 140mm）。机箱未公布电源限长，按${psu.psuLengthMm <= 140 ? '标准尺寸' : '常见 160mm 电源仓'}推断可装入；全模组线材需留出约 20mm。`, highPower,
+        // 2.2.3：电源长度来自该电源自身规格（不统一按 140mm）；机箱限长未公布时只作条件推断。线材空间另行检查（psuCable）
+        add('psuLength', '电源长度', CONDITIONAL, `电源长 ${psu.psuLengthMm}mm（该电源规格）。机箱未公布电源限长，按常见 ATX 电源仓可容纳 ≤160mm 电源推断可装入，需按机箱说明书核对；ATX 规范没有统一电源深度。`, highPower,
           { type: 'engineering-judgment', detail: 'ATX 标准尺寸推断' });
       } else compare('psuLength', '电源长度', psu.psuLengthMm, pc.maxPsuLengthMm, highPower || psu.psuFormFactor === 'SFX-L');
+      // 2.2.3：线材空间与电源本体长度分开判断（模组接口需要额外弯折空间）
+      if (pc.maxPsuLengthMm != null && psu.psuLengthMm != null && /模组/.test(psu.modular ?? '') && psu.psuLengthMm <= pc.maxPsuLengthMm) {
+        const bend = psu.cableBendAllowanceMm ?? 25;
+        const room = pc.maxPsuLengthMm - psu.psuLengthMm;
+        add('psuCable', '电源线材空间', room >= bend ? CONDITIONAL : UNKNOWN, `模组电源长 ${psu.psuLengthMm}mm，机箱电源限长 ${pc.maxPsuLengthMm}mm，剩余 ${room}mm；模组线插头需约 ${bend}mm 弯折空间（工程参考）${room >= bend ? '，需核对硬盘笼 / 风扇位置' : '，空间可能不足'}。`, false);
+      }
       const fit = psuFitCheck(psu, pc);
       add('psuFormat', '电源规格', fit.status, fit.detail, true);
     }
@@ -449,11 +493,11 @@ export function evaluateBuild(parts, { igpu = false, stockCooler = false, worklo
   }
   if (gpu && board) {
     const r = pcieLink(cpu ?? {}, board, gpu);
-    add('pcie', '显卡实际 PCIe 链路', r.status, r.detail);
+    add('pcie', '显卡预计 PCIe 链路', r.status, r.detail);
   }
   if (ssd && board && /M\.2|NVME/i.test(ssd.interface ?? '')) {
     const r = pcieLink(cpu ?? {}, board, ssd, { storage: true, cpuName: parts.CPU?.name ?? '' });
-    add('ssdPcie', 'SSD 实际 PCIe 链路', r.status, r.detail);
+    add('ssdPcie', 'SSD 预计 PCIe 链路', r.status, r.detail);
   }
   // Intel Arc：ReBAR
   if (gpu?.needsResizableBar && board) {

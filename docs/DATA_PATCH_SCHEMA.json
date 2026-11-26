@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pc-build-studio/data-patch/2.2.3",
+  "title": "PC Build Studio 硬件数据补丁",
+  "description": "数据研究方与引擎之间的独立记录格式。由 scripts/import-data-patch.mjs 校验并写入运行时覆盖层 data/hardware-patches.json（不修改目录文件，可按补丁 ID 回滚）。新配件用 ADD，已有字段用 UPDATE，无法核实的字段用 UNRESOLVED（不写值）。",
+  "type": "object",
+  "required": ["records"],
+  "properties": {
+    "id": { "type": "string", "description": "补丁 ID；省略时按内容哈希生成。同一 ID 不能重复应用。" },
+    "source": { "type": "string", "description": "补丁来源说明，如研究分支名" },
+    "records": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/record" } }
+  },
+  "$defs": {
+    "record": {
+      "type": "object",
+      "required": ["op", "category", "field_path"],
+      "properties": {
+        "op": { "enum": ["ADD", "UPDATE", "UNRESOLVED"] },
+        "component_id": { "type": ["string", "null"], "description": "目录 ID（如 zol-1359260）。不能确定时可为空，但必须给出 manufacturer_model，UPDATE 还需能按 manufacturer_sku 唯一匹配。" },
+        "category": { "enum": ["CPU", "GPU", "MOTHERBOARD", "RAM", "SSD", "PSU", "CASE", "COOLER"] },
+        "manufacturer_model": { "type": ["string", "null"] },
+        "manufacturer_sku": { "type": ["string", "null"] },
+        "hardware_revision": { "type": ["string", "null"], "description": "版本标识（如 G13MG、REV 2.0）。给出时必须能在目录条目名称 / 料号中找到，否则作为冲突拒绝合并。" },
+        "field_path": { "type": "string", "pattern": "^specs\\.[A-Za-z0-9]+$", "description": "规格字段路径，见 x-fields。" },
+        "old_value": { "description": "UPDATE 时应用前的当前值；提供时与运行时值不一致即为冲突。null 表示当前缺失。" },
+        "new_value": { "description": "ADD / UPDATE 必填；UNRESOLVED 不得填写。数值字段（*Mm、*Watts、*GB、*MTs）必须是数字。" },
+        "unit": { "type": ["string", "null"], "examples": ["mm", "W", "MT/s", "GB", "dBA", "°C"] },
+        "source_url": { "type": "string", "pattern": "^https://", "description": "ADD / UPDATE 必须为 HTTPS 可核实来源" },
+        "source_type": { "enum": ["manufacturer", "retailer", "third-party-test", "manual-measurement", "datasheet", "other", null] },
+        "observed_at": { "type": ["string", "null"], "format": "date-time" },
+        "verified_at": { "type": ["string", "null"], "format": "date-time", "description": "不能是未来时间" },
+        "confidence": { "enum": ["high", "medium", "low", null] },
+        "verification_status": { "enum": ["verified", "unverified", "conflict", "unresolved", null] },
+        "notes": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        { "if": { "properties": { "op": { "const": "UNRESOLVED" } } }, "then": { "not": { "required": ["new_value"] } } },
+        { "if": { "properties": { "op": { "enum": ["ADD", "UPDATE"] } } }, "then": { "required": ["new_value", "source_url"] } }
+      ]
+    }
+  },
+  "x-fields": {
+    "CASE": ["maxGpuLengthMm", "gpuLengthIncludesFrontFans", "maxGpuHeightMm", "maxGpuThicknessMm", "gpuCableClearanceMm", "maxCoolerHeightMm", "maxPsuLengthMm", "includedFans", "fanMounts", "frontIntake", "radiatorPositions", "topRadiatorClearanceMm", "thermalTests", "supportedBoardFormats", "expansionSlots"],
+    "PSU": ["manufacturerModel", "manufacturerSku", "hardwareRevision", "electricalStandard", "native12vhpwr", "native12v2x6", "connectorPowerRating", "pcie8pinConnectors", "independentPcieCables", "cableSource", "adapterIncluded", "psuLengthMm", "psuFormFactor", "ratedWatts", "rail12vAmps"],
+    "COOLER": ["heightMm", "radiatorSizeMm", "radiatorThicknessMm", "heatPipes", "vendorCoolingWatts", "coolingEvidence", "thermalTests", "sockets"],
+    "MOTHERBOARD": ["memoryMaxMTs", "memoryQvl", "m2Links", "fanHeaders", "biosVersion", "biosFlashback", "rebarSupport", "gpuPcieLink", "laneSharing"],
+    "CPU": ["maxPowerWatts", "basePowerWatts", "cpuMemoryMaxMTs", "cpuMemoryMaxMTsByType", "pcieLink", "storagePcieLink", "stockCoolerIncluded", "stockCoolerRetailSkus"],
+    "GPU": ["boardPowerWatts", "lengthMm", "heightMm", "thicknessMm", "slotWidth", "powerPins", "requiredCableClearanceMm", "powerConnectorPosition", "pcieLink"],
+    "SSD": ["pcieLink", "bitsPerCell", "m2Length", "m2Protocol"],
+    "RAM": ["speedMTs", "jedecMTs", "rank", "modules", "heightMm"]
+  },
+  "x-structured-values": {
+    "thermalTests (COOLER)": { "kind": "measured", "powerWatts": 250, "cpu": "Intel Core Ultra 7 270K Plus", "cpuSocket": "LGA1851", "ambientC": 25, "maxTempC": 88, "tempLimitC": 105, "durationMinutes": 30, "noiseDbA": 38, "sourceUrl": "https://…" },
+    "thermalTests (CASE)": { "kind": "measured", "cpuWatts": 160, "gpuWatts": 600, "ambientC": 25, "durationMinutes": 30, "withinLimits": true, "noiseDbA": 40, "sourceUrl": "https://…" },
+    "m2Links": [{ "slot": "M2_1", "source": "CPU", "protocol": "NVME", "gen": 5, "lanes": 4, "lengths": [2280], "sharedLanes": [], "disabledPorts": [], "cpuDependentLimits": [{ "cpuPattern": "RYZEN\\s*5\\s*8500", "effect": "disabled" }] }],
+    "memoryQvl": [{ "sku": "…", "modules": 2, "rank": 1, "speedMTs": 6400 }],
+    "fanMounts": [{ "position": "front", "count": 3, "sizeMm": 120 }]
+  }
+}

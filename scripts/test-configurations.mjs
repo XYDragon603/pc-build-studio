@@ -25,6 +25,27 @@ const esbuild = requireWeb('esbuild');
 const compiled = await esbuild.build({ stdin: { contents: "export { planToBuild } from './web/src/domain/plan.ts'; export { toApiInput } from './web/src/api/mapping.ts';", resolveDir: process.cwd(), loader: 'ts' }, bundle: true, platform: 'node', format: 'esm', write: false });
 const { planToBuild, toApiInput } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const testedAt = new Date().toISOString();
+// 2.2.3：方案诊断信息（生成时间、版本、数据快照、策略与约束、关键风险、局部替换、安全备选、降功耗方案、升级候选、成本分解、评分维度）
+function diagnosticsMarkdown(plan) {
+  const d = plan.diagnostics; if (!d) return [];
+  const yuan = c => (c == null ? '—' : `¥${Math.round(c / 100).toLocaleString('zh-CN')}`);
+  const parts = p => (p.picks ?? []).map(x => `${x.slot} ${x.item.name}`).join('；') + (p.stockCooler ? '；原装散热' : '') + (p.igpu ? '；核显' : '');
+  const cb = plan.costBreakdown;
+  const rs = plan.riskSearch ?? {};
+  return ['', '### 方案诊断', '',
+    `- 生成时间：${d.generatedAt}；软件版本 ${d.softwareVersion}；规则版本 ${d.rulesVersion}；数据快照 ${d.dataSnapshotId}；推荐策略 ${d.strategy}`,
+    `- 约束：${JSON.stringify(d.constraints)}`,
+    cb ? `- 成本：${cb.totalLabel ?? '估算总价'} ${yuan(cb.completeBuildCents)} = 八件套 ${yuan(cb.coreCents)} + 必需附件 ${yuan(cb.requiredAccessoriesCents)}（已确认 ${yuan(cb.confirmedAccessoriesCents)}、估算 ${yuan(cb.estimatedAccessoriesCents)}、待定上限 ${yuan(cb.contingentAccessoriesMaxCents)}）；区间 ${yuan(cb.estimatedRangeCents[0])}–${yuan(cb.estimatedRangeCents[1])}` : '',
+    `- 评分维度：${JSON.stringify(d.scoreDimensions)}；性能依据：${d.performanceBasis}（${d.performanceIsProxy ? '代理指标，非实测' : '同测试组实测'}，可信度 ${d.confidence}）；CPU 性能假设 ${d.cpuPerformanceAssumption}`,
+    `- 关键风险：${d.risks.length ? d.risks.map(r => `${r.label}（${r.status}${r.blocking ? '，阻断' : ''}）`).join('；') : '无'}`,
+    `- 局部替换：${rs.result ?? '—'}${rs.replacements?.length ? `；${rs.replacements.map(r => `${r.from} → ${r.to}`).join('；')}` : ''}${rs.reason ? `；${rs.reason}` : ''}${rs.combosEvaluated ? `；评估组合 ${rs.combosEvaluated}` : ''}`,
+    ...Object.entries(rs.slots ?? {}).map(([slot, r]) => `  - ${slot}：候选 ${r.candidates}，淘汰 ${JSON.stringify(r.eliminated)}`),
+    rs.safetyFirst ? `- 安全优先替换：${rs.safetyFirst.reason}（核心变化 ${rs.safetyFirst.coreChangePercent}%）；原方案：${Object.values(rs.safetyFirst.from.parts).join('；')}` : '',
+    plan.safeAlternative ? `- 安全备选（独立，无阻断项）：${yuan(plan.safeAlternative.totalCents)}，核心变化 ${plan.safeAlternative.coreChangePercent}%：${parts(plan.safeAlternative)}` : '',
+    plan.powerLimitOption ?? rs.initialPowerLimitOption ? (o => `- 降功耗方案：${o.targetW}W（满功耗 ${o.fullPowerW}W）；BIOS：${o.biosSettings.join('；')}；热负载 ${o.thermalLoadW.total}W；电源计算需求 ${o.psuRequirement.calculated}W；性能：${o.performanceNote}`)(plan.powerLimitOption ?? rs.initialPowerLimitOption) : '',
+    ...(plan.upgrades?.length ? ['- 核心性能升级候选（完整配置）：', ...plan.upgrades.map(u => `  - ${yuan(u.totalCents)}（+${yuan(u.extraCents)}）${u.reason}：${parts(u)}`)] : []),
+    ''].filter(x => x !== '');
+}
 const money = cents => `¥${(cents / 100).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`;
 const cell = text => String(text ?? '').replaceAll('|', '\\|').replaceAll('\n', ' ');
 const labels = { cpuSocket: 'CPU 插槽', memoryType: '内存代际', bios: 'BIOS', power: '电源功率', gpuClearance: '显卡长度', coolerClearance: '风冷高度', radiatorClearance: '水冷排尺寸', boardFit: '主板板型', gpuPowerConnector: '显卡供电接口' };
@@ -82,7 +103,7 @@ try {
       }
       backup.builds.push(build);
       const statusText = { PASS: '已确认通过', CONDITIONAL: '条件通过，需满足指定条件', UNKNOWN: '数据不足，待核实', FAIL: '不兼容' }[checks.overall] ?? '无结论';
-      markdown.push(`## ${plan.label}`, '', `目标预算：${money(plan.targetCents)}；估算合计：${money(plan.totalCents)}；输入预算余额：${money(checks.inputBudgetDifferenceCents)}；本档目标预算余额：${money(plan.targetCents - plan.totalCents)}。`, '', `方案类别：${plan.recommendationStatus}；正式已确认推荐：${plan.formalRecommendation ? '是' : '否'}。`, '', '| 配件 | 型号 | 估算价格 |', '|---|---|---:|', ...build.slots.map(s => `| ${s.label} | ${cell(s.part?.model ?? '缺失')} | ${s.part ? money(s.part.priceCents) : '—'} |`), '', `综合评分：${plan.score?.total ?? '—'}${plan.sameAs ? '（与上一档相同）' : ''}；规则版本：${plan.score?.version ?? '未知'}（版本号，不是数据采集日期）。`, '', `兼容性：${checks.overall} — ${statusText}。${!withinTarget ? '超出本档目标预算，仅为替代方案。' : ''}${conflicts.length ? `不兼容：${conflicts.join('、')}。` : ''}`, '', `需满足条件：${conditional.join('、') || '无'}。待核实：${unknowns.join('、') || '无'}。`, '', '| 检查项目 | 状态 | 风险 | 需先核实 | 证据 / 条件 |', '|---|---|---|---|---|', ...planChecks.map(c => `| ${c.label} | ${c.status} | ${c.severity ?? '—'} | ${c.blocking ? '是' : '—'} | ${cell(c.detail)} |`), '', ...plan.notes.map(n => `- ${n}`), '', '选件依据及价格观察时间：', '', ...plan.picks.map(p => `- ${slotTypes.find(s => s.id === p.slot)?.label ?? p.slot}：${p.reason}；价格观察时间 ${p.item.priceObservedAt ?? '未知'}；性能数据日期 ${p.item.performance?.gaming?.observedAt ?? p.item.performance?.blender?.observedAt ?? '未标注，见数据来源快照'}。`), '');
+      markdown.push(`## ${plan.label}`, '', `目标预算：${money(plan.targetCents)}；估算合计：${money(plan.totalCents)}；输入预算余额：${money(checks.inputBudgetDifferenceCents)}；本档目标预算余额：${money(plan.targetCents - plan.totalCents)}。`, '', `方案类别：${plan.recommendationStatus}；正式已确认推荐：${plan.formalRecommendation ? '是' : '否'}。`, '', '| 配件 | 型号 | 估算价格 |', '|---|---|---:|', ...build.slots.map(s => `| ${s.label} | ${cell(s.part?.model ?? '缺失')} | ${s.part ? money(s.part.priceCents) : '—'} |`), '', `综合评分：${plan.score?.total ?? '—'}${plan.sameAs ? '（与上一档相同）' : ''}；规则版本：${plan.score?.version ?? '未知'}（版本号，不是数据采集日期）。`, '', `兼容性：${checks.overall} — ${statusText}。${!withinTarget ? '超出本档目标预算，仅为替代方案。' : ''}${conflicts.length ? `不兼容：${conflicts.join('、')}。` : ''}`, '', `需满足条件：${conditional.join('、') || '无'}。待核实：${unknowns.join('、') || '无'}。`, '', '| 检查项目 | 状态 | 风险 | 需先核实 | 证据 / 条件 |', '|---|---|---|---|---|', ...planChecks.map(c => `| ${c.label} | ${c.status} | ${c.severity ?? '—'} | ${c.blocking ? '是' : '—'} | ${cell(c.detail)} |`), '', ...plan.notes.map(n => `- ${n}`), '', '选件依据及价格观察时间：', '', ...plan.picks.map(p => `- ${slotTypes.find(s => s.id === p.slot)?.label ?? p.slot}：${p.reason}；价格观察时间 ${p.item.priceObservedAt ?? '未知'}；性能数据日期 ${p.item.performance?.gaming?.observedAt ?? p.item.performance?.blender?.observedAt ?? '未标注，见数据来源快照'}。`), '', ...diagnosticsMarkdown(plan));
     }
     const strictResponse = await fetch(`${base}/plans`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...request, maxOverPercent: 0 }) }).then(r => r.json());
     assert.ok(Array.isArray(strictResponse.plans));
